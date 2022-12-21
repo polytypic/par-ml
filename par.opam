@@ -1,0 +1,16 @@
+opam-version: "2.0"
+version: "1.0.0"
+synopsis: "Experimental parallel primitives for OCaml"
+maintainer: "Vesa Karvonen <vesa.a.j.k@gmail.com>"
+authors: "Vesa Karvonen"
+license: "MIT"
+homepage: "https://github.com/polytypic/par-ml"
+bug-reports: "https://github.com/polytypic/par-ml/issues"
+dev-repo: "git+https://github.com/polytypic/par-ml.git"
+depends: [
+  "dune" {>= "3.3.0"}
+  "ocaml" {>= "5.0.0"}
+  "ocamlformat" {= "0.23.0" & with-test}
+  "odoc" {>= "2.1.1" & with-doc}
+]
+build: ["dune" "build" "-p" name "-j" jobs]

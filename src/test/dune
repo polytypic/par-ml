@@ -1,0 +1,3 @@
+(tests
+ (names Exns FibFiber FibPar)
+ (libraries Par))
