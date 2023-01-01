@@ -37,6 +37,7 @@ TODO:
 - Is the
   [work-stealing deque](https://github.com/polytypic/par-ml/blob/d64a7f5941409b3ce56a91912075ac27fdc5341f/src/main/DCYL.ml)
   implementation correct?
+- Implement more scalable wake-up mechanism.
 - Support for cancellation.
 - `sleep` mechanism.
 - Composable synchronization primitives (e.g. ability to `race` fibers).

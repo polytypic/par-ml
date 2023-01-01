@@ -18,7 +18,7 @@ let handler = {Effect.Deep.effc}
 
 let mutex = Mutex.create ()
 let condition = Condition.create ()
-let num_waiters = ref 0
+let num_waiters = ref 0 (* TODO: this is non-scalable *)
 
 type worker = (unit -> unit) DCYL.t
 
