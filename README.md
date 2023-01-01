@@ -3,26 +3,40 @@
 Compared to [lockfree](https://github.com/ocaml-multicore/lockfree)
 work-stealing deque:
 
-- Only a single atomic variable is used (closer to original paper).
-- A level of (pointer) indirection is avoided by using a different technique to
-  release stolen elements.
-- `mark` and `drop_at` operations are provided to allow owner to remove elements
-  from deque without dropping to main loop.
+- Only
+  [a single atomic variable](https://github.com/polytypic/par-ml/blob/d64a7f5941409b3ce56a91912075ac27fdc5341f/src/main/DCYL.ml#L12)
+  is used (closer to
+  [original paper](https://www.semanticscholar.org/paper/Dynamic-circular-work-stealing-deque-Chase-Lev/f856a996e7aec0ea6db55e9247a00a01cb695090)).
+- A level of (pointer) indirection is avoided by using
+  [a different technique to release stolen elements](https://github.com/polytypic/par-ml/blob/d64a7f5941409b3ce56a91912075ac27fdc5341f/src/main/DCYL.ml#L37-L46).
+- [`mark` and `drop_at` operations](https://github.com/polytypic/par-ml/blob/d64a7f5941409b3ce56a91912075ac27fdc5341f/src/main/DCYL.mli#L20-L25)
+  are provided to allow owner to remove elements from deque without dropping to
+  main loop (see
+  [here](https://github.com/polytypic/par-ml/blob/d64a7f5941409b3ce56a91912075ac27fdc5341f/src/main/Par.ml#L156)
+  and
+  [here](https://github.com/polytypic/par-ml/blob/d64a7f5941409b3ce56a91912075ac27fdc5341f/src/main/Par.ml#L164),
+  for example).
 
 Compared to [domainslib](https://github.com/ocaml-multicore/domainslib):
 
-- A more general `Suspend` effect is used to allow synchronization primitives to
-  be built on top of the scheduler.
+- A more general
+  [`Suspend` effect](https://github.com/polytypic/par-ml/blob/d64a7f5941409b3ce56a91912075ac27fdc5341f/src/main/Par.ml#L9)
+  is used to allow synchronization primitives to be built on top of the
+  scheduler.
 - The pool of workers is not exposed. The idea is that there is only one system
   level pool of workers to be used by all parallel and concurrent code.
-  `Domain.self ()` is used as index and are assumed to be consecutive numbers in
-  the range `[0, n[`.
-- A lower overhead `par` operation is provided for parallel execution. It avoids
-  need to maintain a list of readers.
+  [`Domain.self ()` is used as index](https://github.com/polytypic/par-ml/blob/d64a7f5941409b3ce56a91912075ac27fdc5341f/src/main/Par.ml#L90)
+  and are assumed to be consecutive numbers in the range `[0, n[`.
+- A lower overhead
+  [`par` operation](https://github.com/polytypic/par-ml/blob/d64a7f5941409b3ce56a91912075ac27fdc5341f/src/main/Par.mli#L4-L6)
+  is provided for parallel execution. It avoids need to maintain a list of
+  readers.
 
 TODO:
 
-- Is the work-stealing deque implementation correct?
+- Is the
+  [work-stealing deque](https://github.com/polytypic/par-ml/blob/d64a7f5941409b3ce56a91912075ac27fdc5341f/src/main/DCYL.ml)
+  implementation correct?
 - Support for cancellation.
 - Composable synchronization primitives (e.g. ability to `race` fibers).
 - Various synchronization primitives (mutex, condition, ...) as examples.
