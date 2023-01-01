@@ -38,6 +38,7 @@ TODO:
   [work-stealing deque](https://github.com/polytypic/par-ml/blob/d64a7f5941409b3ce56a91912075ac27fdc5341f/src/main/DCYL.ml)
   implementation correct?
 - Support for cancellation.
+- `sleep` mechanism.
 - Composable synchronization primitives (e.g. ability to `race` fibers).
 - Various synchronization primitives (mutex, condition, ...) as examples.
 
