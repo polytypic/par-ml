@@ -118,70 +118,68 @@ let run ef =
 
 (* *)
 
-type ('a, 'b) par =
-  | Initial
-  | LeftOk of 'a
-  | LeftError of exn
-  | RightOk of ('a * 'b) Continuation.t * 'b
-  | RightError of ('a * 'b) Continuation.t * exn
-
 let par tha thb =
-  let st = Atomic.make Initial in
+  let open struct
+    type ('a, 'b) par =
+      | Initial of (unit -> 'a)
+      | Running
+      | LeftOk of 'a
+      | LeftError of exn
+      | RightOk of ('a * 'b) Continuation.t * 'b
+      | RightError of ('a * 'b) Continuation.t * exn
+  end in
+  let st = Atomic.make @@ Initial tha in
   let work () =
-    match tha () with
-    | x -> begin
-      match Atomic.get st with
-      | RightOk (k, y) -> Continuation.return k (x, y)
-      | RightError (k, e) -> Continuation.raise k e
-      | initial ->
-        if not (Atomic.compare_and_set st initial (LeftOk x)) then begin
-          match Atomic.get st with
-          | RightOk (k, y) -> Continuation.return k (x, y)
-          | RightError (k, e) -> Continuation.raise k e
-          | _ -> impossible ()
-        end
+    match Atomic.exchange st Running with
+    | Initial tha -> begin
+      match tha () with
+      | x -> begin
+        match Atomic.exchange st (LeftOk x) with
+        | RightOk (k, y) -> Continuation.return k (x, y)
+        | RightError (k, e) -> Continuation.raise k e
+        | _ -> ()
+      end
+      | exception e -> begin
+        match Atomic.exchange st (LeftError e) with
+        | RightOk (k, _) | RightError (k, _) -> Continuation.raise k e
+        | _ -> ()
+      end
     end
-    | exception e -> begin
-      match Atomic.get st with
-      | RightOk (k, _) | RightError (k, _) -> Continuation.raise k e
-      | initial ->
-        if not (Atomic.compare_and_set st initial (LeftError e)) then begin
-          match Atomic.get st with
-          | RightOk (k, _) | RightError (k, _) -> Continuation.raise k e
-          | _ -> impossible ()
-        end
-    end
+    | _ -> ()
   in
   let wr = worker () in
   let i = DCYL.mark wr in
   push wr work;
   match thb () with
   | y -> begin
-    match Atomic.get st with
+    match Atomic.exchange st Running with
     | LeftOk x -> (x, y)
     | LeftError e -> raise e
-    | initial ->
-      if DCYL.drop_at wr i then (tha (), y)
-      else
-        Continuation.suspend @@ fun k ->
-        if not (Atomic.compare_and_set st initial (RightOk (k, y))) then begin
-          match Atomic.get st with
-          | LeftOk x -> Continuation.return k (x, y)
-          | LeftError e -> Continuation.raise k e
-          | _ -> impossible ()
-        end
+    | Initial tha ->
+      DCYL.drop_at wr i |> ignore;
+      (tha (), y)
+    | _running -> begin
+      Continuation.suspend @@ fun k ->
+      match Atomic.exchange st (RightOk (k, y)) with
+      | LeftOk x -> Continuation.return k (x, y)
+      | LeftError e -> Continuation.raise k e
+      | _ -> ()
+    end
   end
   | exception e -> begin
-    match Atomic.get st with
+    match Atomic.exchange st Running with
     | LeftOk _ -> raise e
     | LeftError e -> raise e
-    | initial ->
-      if DCYL.drop_at wr i then raise e
-      else
-        Continuation.suspend @@ fun k ->
-        if not (Atomic.compare_and_set st initial (RightError (k, e))) then
-          let e = match Atomic.get st with LeftError e -> e | _ -> e in
-          Continuation.raise k e
+    | Initial _ ->
+      DCYL.drop_at wr i |> ignore;
+      raise e
+    | _running -> begin
+      Continuation.suspend @@ fun k ->
+      match Atomic.exchange st (RightError (k, e)) with
+      | LeftOk _ -> Continuation.raise k e
+      | LeftError e -> Continuation.raise k e
+      | _ -> ()
+    end
   end
 
 (* *)
