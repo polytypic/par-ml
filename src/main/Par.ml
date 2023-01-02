@@ -189,15 +189,15 @@ let par tha thb =
 module Fiber = struct
   type 'a st =
     | Initial of (unit -> 'a) * worker * DCYL.pos
-    | Run
-    | Wait of 'a Continuation.t * 'a st
+    | Running
+    | Join of 'a Continuation.t * 'a st
     | Ok of 'a
     | Error of exn
 
   type 'a t = 'a st Atomic.t
 
   let rec dispatch res = function
-    | Wait (k, ws) ->
+    | Join (k, ws) ->
       begin
         match res with
         | Ok x -> Continuation.return k x
@@ -217,7 +217,7 @@ module Fiber = struct
     let work () =
       match Atomic.get st with
       | Initial (th, _, _) as t ->
-        if Atomic.compare_and_set st t Run then run st th |> ignore
+        if Atomic.compare_and_set st t Running then run st th |> ignore
       | _ -> ()
     in
     push wr work;
@@ -226,7 +226,7 @@ module Fiber = struct
   let rec join st =
     match Atomic.get st with
     | Initial (th, wr', i) as t ->
-      if Atomic.compare_and_set st t Run then begin
+      if Atomic.compare_and_set st t Running then begin
         let wr = worker () in
         if wr == wr' then DCYL.drop_at wr i |> ignore;
         match run st th with
@@ -237,10 +237,10 @@ module Fiber = struct
       else join st
     | Ok x -> x
     | Error e -> raise e
-    | (Run | Wait _) as w ->
+    | (Running | Join _) as w ->
       Continuation.suspend @@ fun k ->
       let rec loop w =
-        if not (Atomic.compare_and_set st w (Wait (k, w))) then
+        if not (Atomic.compare_and_set st w (Join (k, w))) then
           match Atomic.get st with
           | Ok x -> Continuation.return k x
           | Error e -> Continuation.raise k e
