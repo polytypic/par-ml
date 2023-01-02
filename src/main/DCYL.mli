@@ -18,7 +18,7 @@ val pop : 'a t -> 'a
     the owner may call this. *)
 
 val mark : 'a t -> pos
-(** Get position of next `push`. *)
+(** Get position of next [push]. *)
 
 val drop_at : 'a t -> pos -> bool
 (** Attempt to drop element at given position from the deque.  Only the owner
