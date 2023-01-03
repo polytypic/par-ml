@@ -120,13 +120,12 @@ let run ef =
 
 let par tha thb =
   let open struct
-    type ('a, 'b) par =
+    type 'a par =
       | Initial of (unit -> 'a)
       | Running
-      | LeftOk of 'a
-      | LeftError of exn
-      | RightOk of ('a * 'b) Continuation.t * 'b
-      | RightError of ('a * 'b) Continuation.t * exn
+      | Join of 'a Continuation.t
+      | Ok of 'a
+      | Error of exn
   end in
   let st = Atomic.make @@ Initial tha in
   let work () =
@@ -134,14 +133,13 @@ let par tha thb =
     | Initial tha -> begin
       match tha () with
       | x -> begin
-        match Atomic.exchange st (LeftOk x) with
-        | RightOk (k, y) -> Continuation.return k (x, y)
-        | RightError (k, e) -> Continuation.raise k e
+        match Atomic.exchange st (Ok x) with
+        | Join k -> Continuation.return k x
         | _ -> ()
       end
       | exception e -> begin
-        match Atomic.exchange st (LeftError e) with
-        | RightOk (k, _) | RightError (k, _) -> Continuation.raise k e
+        match Atomic.exchange st (Error e) with
+        | Join k -> Continuation.raise k e
         | _ -> ()
       end
     end
@@ -153,34 +151,33 @@ let par tha thb =
   match thb () with
   | y -> begin
     match Atomic.exchange st Running with
-    | LeftOk x -> (x, y)
-    | LeftError e -> raise e
+    | Ok x -> (x, y)
+    | Error e -> raise e
     | Initial tha ->
       DCYL.drop_at wr i |> ignore;
       (tha (), y)
-    | _running -> begin
-      Continuation.suspend @@ fun k ->
-      match Atomic.exchange st (RightOk (k, y)) with
-      | LeftOk x -> Continuation.return k (x, y)
-      | LeftError e -> Continuation.raise k e
-      | _ -> ()
-    end
+    | _running ->
+      ( Continuation.suspend (fun k ->
+            match Atomic.exchange st (Join k) with
+            | Ok x -> Continuation.return k x
+            | Error e -> Continuation.raise k e
+            | _ -> ()),
+        y )
   end
-  | exception e -> begin
-    match Atomic.exchange st Running with
-    | LeftOk _ -> raise e
-    | LeftError e -> raise e
-    | Initial _ ->
-      DCYL.drop_at wr i |> ignore;
-      raise e
-    | _running -> begin
-      Continuation.suspend @@ fun k ->
-      match Atomic.exchange st (RightError (k, e)) with
-      | LeftOk _ -> Continuation.raise k e
-      | LeftError e -> Continuation.raise k e
-      | _ -> ()
-    end
-  end
+  | exception e ->
+    let _ =
+      match Atomic.exchange st Running with
+      | Ok _ -> null ()
+      | Error e -> raise e
+      | Initial _ -> DCYL.drop_at wr i |> null
+      | _running ->
+        Continuation.suspend (fun k ->
+            match Atomic.exchange st (Join k) with
+            | Ok _ -> Continuation.return k (null ())
+            | Error e -> Continuation.raise k e
+            | _ -> ())
+    in
+    raise e
 
 (* *)
 
