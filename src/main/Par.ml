@@ -25,7 +25,7 @@ type worker = (unit -> unit) DCYL.t
 let num_workers =
   Sys.argv
   |> Array.find_map (fun arg ->
-         let prefix = "--num_workers=" in
+         let prefix = "--num-workers=" in
          if String.starts_with ~prefix arg then
            let n = String.length prefix in
            String.sub arg n (String.length arg - n) |> int_of_string_opt

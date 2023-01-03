@@ -48,27 +48,27 @@ TODO:
 These have been run on Apple M1 with 4 + 4 cores in low power mode.
 
 ```sh
-➜  par-ml git:(main) for d in 1 2 4 8; do time FibFiber.exe --num_workers=$d 40; done
+➜  par-ml git:(main) for d in 1 2 4 8; do time FibFiber.exe --num-workers=$d 40; done
 fib 40 = 102334155
-FibFiber.exe --num_workers=$d 40  8.16s user 0.02s system 99% cpu 8.185 total
+FibFiber.exe --num-workers=$d 40  8.16s user 0.02s system 99% cpu 8.185 total
 fib 40 = 102334155
-FibFiber.exe --num_workers=$d 40  8.82s user 0.02s system 199% cpu 4.437 total
+FibFiber.exe --num-workers=$d 40  8.82s user 0.02s system 199% cpu 4.437 total
 fib 40 = 102334155
-FibFiber.exe --num_workers=$d 40  16.47s user 0.05s system 396% cpu 4.165 total
+FibFiber.exe --num-workers=$d 40  16.47s user 0.05s system 396% cpu 4.165 total
 fib 40 = 102334155
-FibFiber.exe --num_workers=$d 40  36.49s user 0.60s system 691% cpu 5.366 total
+FibFiber.exe --num-workers=$d 40  36.49s user 0.60s system 691% cpu 5.366 total
 ```
 
 ```sh
-➜  par-ml git:(main) ✗ for d in 1 2 4 8; do time FibPar.exe --num_workers=$d 40; done
+➜  par-ml git:(main) ✗ for d in 1 2 4 8; do time FibPar.exe --num-workers=$d 40; done
 fib 40 = 102334155
-FibPar.exe --num_workers=$d 40  5.70s user 0.01s system 99% cpu 5.718 total
+FibPar.exe --num-workers=$d 40  5.70s user 0.01s system 99% cpu 5.718 total
 fib 40 = 102334155
-FibPar.exe --num_workers=$d 40  6.66s user 0.02s system 198% cpu 3.353 total
+FibPar.exe --num-workers=$d 40  6.66s user 0.02s system 198% cpu 3.353 total
 fib 40 = 102334155
-FibPar.exe --num_workers=$d 40  13.54s user 0.04s system 395% cpu 3.436 total
+FibPar.exe --num-workers=$d 40  13.54s user 0.04s system 395% cpu 3.436 total
 fib 40 = 102334155
-FibPar.exe --num_workers=$d 40  27.18s user 0.49s system 684% cpu 4.042 total
+FibPar.exe --num-workers=$d 40  27.18s user 0.49s system 684% cpu 4.042 total
 ```
 
 In the following, the `fib_par` example of domainslib
