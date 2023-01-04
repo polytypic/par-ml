@@ -8,12 +8,34 @@
    allow the owner to clear (or release) stolen elements for GC to work.  It
    is not safe for thieves to write to the `elems` array of the deque. *)
 
+[@@@ocaml.warning "-69"] (* Disable unused field warning. *)
+
 type 'a t = {
+  p1 : int;
+  p2 : int;
+  p3 : int;
+  p4 : int;
+  p5 : int;
+  p6 : int;
+  p7 : int;
   lo : int Atomic.t;
   (* Only the owner mutates the rest: *)
   mutable elems : 'a array;
+  m1 : int;
+  m2 : int;
+  m3 : int;
+  m4 : int;
+  m5 : int;
+  m6 : int;
   mutable lo_cache : int;
   mutable hi : int;
+  s1 : int;
+  s2 : int;
+  s3 : int;
+  s4 : int;
+  s5 : int;
+  s6 : int;
+  s7 : int;
 }
 
 type pos = int
@@ -28,11 +50,36 @@ let mask_of array =
 let null _ = Obj.magic () [@@inline]
 
 let make () =
-  let lo = Atomic.make 0
-  and elems = Array.make 2 (null ())
-  and lo_cache = 0
-  and hi = 0 in
-  {lo; elems; lo_cache; hi}
+  let dcyl =
+    {
+      p1 = 0;
+      p2 = 0;
+      p3 = 0;
+      p4 = 0;
+      p5 = 0;
+      p6 = 0;
+      p7 = 0;
+      lo = Atomic.make 0;
+      elems = null ();
+      m1 = 0;
+      m2 = 0;
+      m3 = 0;
+      m4 = 0;
+      m5 = 0;
+      m6 = 0;
+      lo_cache = 0;
+      hi = 0;
+      s1 = 0;
+      s2 = 0;
+      s3 = 0;
+      s4 = 0;
+      s5 = 0;
+      s6 = 0;
+      s7 = 0;
+    }
+  in
+  dcyl.elems <- Array.make 64 (null ());
+  dcyl
 
 (* This writes `null ()` over stolen elements to allow GC to work.  This is
    called by the owner from `push`, `pop` and `drop_at` when the `lo_cache` is
