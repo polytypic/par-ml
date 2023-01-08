@@ -32,7 +32,7 @@ let num_workers =
          else None)
   |> Option.value ~default:(Domain.recommended_domain_count ())
 
-let workers = Array.init num_workers (fun _ -> DCYL.make ())
+let workers = Array.init num_workers (fun _ -> null ())
 
 let rec loop dcyl =
   let work = DCYL.pop dcyl in
@@ -56,10 +56,11 @@ and try_steal_loop wr i =
 
 and wait wr =
   if wr != workers.(0) then begin
-    Mutex.protect mutex (fun () ->
-        incr num_waiters;
-        Condition.wait condition mutex;
-        decr num_waiters);
+    Mutex.lock mutex;
+    incr num_waiters;
+    Condition.wait condition mutex;
+    decr num_waiters;
+    Mutex.unlock mutex;
     try_steal wr
   end
 
@@ -69,23 +70,33 @@ let () =
   let add_worker () =
     let i = (Domain.self () :> int) in
     if Array.length workers <= i then failwith "add_worker: not sequential";
-    Mutex.protect mutex @@ fun () ->
+    let wr = DCYL.make () in
+    Mutex.lock mutex;
+    Array.unsafe_set workers i wr;
     incr num_workers';
     Condition.broadcast condition;
-    workers.(i)
+    Mutex.unlock mutex;
+    wr
+  in
+
+  let wait_ready () =
+    Mutex.lock mutex;
+    while !num_workers' <> num_workers do
+      Condition.wait condition mutex
+    done;
+    Mutex.unlock mutex
   in
 
   add_worker () |> ignore;
   for _ = 2 to num_workers do
     Domain.spawn (fun () ->
         let wr = add_worker () in
+        wait_ready ();
         main wr)
     |> ignore
   done;
-  Mutex.protect mutex @@ fun () ->
-  while !num_workers' <> num_workers do
-    Condition.wait condition mutex
-  done
+
+  wait_ready ()
 
 let worker () = workers.((Domain.self () :> int)) [@@inline]
 
