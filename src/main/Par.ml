@@ -22,17 +22,20 @@ let num_waiters = ref 0 (* TODO: this is non-scalable *)
 
 type worker = (unit -> unit) DCYL.t
 
-let num_workers =
-  Sys.argv
-  |> Array.find_map (fun arg ->
-         let prefix = "--num-workers=" in
-         if String.starts_with ~prefix arg then
-           let n = String.length prefix in
-           String.sub arg n (String.length arg - n) |> int_of_string_opt
-         else None)
-  |> Option.value ~default:(Domain.recommended_domain_count ())
-
-let workers = Array.init num_workers (fun _ -> null ())
+let workers =
+  let num_workers =
+    Sys.argv
+    |> Array.find_map (fun arg ->
+           let prefix = "--num-workers=" in
+           if String.starts_with ~prefix arg then
+             let n = String.length prefix in
+             String.sub arg n (String.length arg - n) |> int_of_string_opt
+           else None)
+    |> Option.map (Int.max 1)
+    |> Option.map (Int.min (Domain.recommended_domain_count ()))
+    |> Option.value ~default:(Domain.recommended_domain_count ())
+  in
+  Array.init num_workers (fun _ -> null ())
 
 let rec loop dcyl =
   let work = DCYL.pop dcyl in
@@ -42,7 +45,7 @@ let rec loop dcyl =
 let rec main wr = try loop wr with DCYL.Empty -> try_steal wr
 
 and try_steal wr =
-  try_steal_loop wr (((Domain.self () :> int) + 1) mod num_workers)
+  try_steal_loop wr (((Domain.self () :> int) + 1) mod Array.length workers)
 
 and try_steal_loop wr i =
   let victim = workers.(i) in
@@ -52,7 +55,8 @@ and try_steal_loop wr i =
     | work ->
       Effect.Deep.try_with work () handler;
       main wr
-    | exception DCYL.Empty -> try_steal_loop wr ((i + 1) mod num_workers)
+    | exception DCYL.Empty ->
+      try_steal_loop wr ((i + 1) mod Array.length workers)
 
 and wait wr =
   if wr != workers.(0) then begin
@@ -81,14 +85,14 @@ let () =
 
   let wait_ready () =
     Mutex.lock mutex;
-    while !num_workers' <> num_workers do
+    while !num_workers' <> Array.length workers do
       Condition.wait condition mutex
     done;
     Mutex.unlock mutex
   in
 
   add_worker () |> ignore;
-  for _ = 2 to num_workers do
+  for _ = 2 to Array.length workers do
     Domain.spawn (fun () ->
         let wr = add_worker () in
         wait_ready ();
