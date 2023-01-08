@@ -48,27 +48,57 @@ TODO:
 These have been run on Apple M1 with 4 + 4 cores in low power mode.
 
 ```sh
-➜  par-ml git:(main) for d in 1 2 4 8; do time FibFiber.exe --num-workers=$d 40; done
-fib 40 = 102334155
-FibFiber.exe --num-workers=$d 40  8.16s user 0.02s system 99% cpu 8.185 total
-fib 40 = 102334155
-FibFiber.exe --num-workers=$d 40  8.82s user 0.02s system 199% cpu 4.437 total
-fib 40 = 102334155
-FibFiber.exe --num-workers=$d 40  16.47s user 0.05s system 396% cpu 4.165 total
-fib 40 = 102334155
-FibFiber.exe --num-workers=$d 40  36.49s user 0.60s system 691% cpu 5.366 total
+➜  N=37; hyperfine "FibFiber.exe --num-workers=1 $N" "FibFiber.exe --num-workers=2 $N" "FibFiber.exe --num-workers=4 $N" "FibFiber.exe --num-workers=8 $N"
+Benchmark 1: FibFiber.exe --num-workers=1 37
+  Time (mean ± σ):      1.241 s ±  0.009 s    [User: 1.236 s, System: 0.003 s]
+  Range (min … max):    1.223 s …  1.250 s    10 runs
+
+Benchmark 2: FibFiber.exe --num-workers=2 37
+  Time (mean ± σ):     923.8 ms ±  12.2 ms    [User: 1832.2 ms, System: 5.0 ms]
+  Range (min … max):   907.7 ms … 935.9 ms    10 runs
+
+Benchmark 3: FibFiber.exe --num-workers=4 37
+  Time (mean ± σ):     570.7 ms ±  66.0 ms    [User: 2234.5 ms, System: 8.4 ms]
+  Range (min … max):   547.5 ms … 758.6 ms    10 runs
+
+  Warning: Statistical outliers were detected. Consider re-running this benchmark on a quiet PC without any interferences from other programs. It might help to use the '--warmup' or '--prepare' options.
+
+Benchmark 4: FibFiber.exe --num-workers=8 37
+  Time (mean ± σ):     695.6 ms ±  89.2 ms    [User: 4779.8 ms, System: 93.7 ms]
+  Range (min … max):   597.8 ms … 823.5 ms    10 runs
+
+Summary
+  'FibFiber.exe --num-workers=4 37' ran
+    1.22 ± 0.21 times faster than 'FibFiber.exe --num-workers=8 37'
+    1.62 ± 0.19 times faster than 'FibFiber.exe --num-workers=2 37'
+    2.17 ± 0.25 times faster than 'FibFiber.exe --num-workers=1 37'
 ```
 
 ```sh
-➜  par-ml git:(main) ✗ for d in 1 2 4 8; do time FibPar.exe --num-workers=$d 40; done
-fib 40 = 102334155
-FibPar.exe --num-workers=$d 40  5.70s user 0.01s system 99% cpu 5.718 total
-fib 40 = 102334155
-FibPar.exe --num-workers=$d 40  6.66s user 0.02s system 198% cpu 3.353 total
-fib 40 = 102334155
-FibPar.exe --num-workers=$d 40  13.54s user 0.04s system 395% cpu 3.436 total
-fib 40 = 102334155
-FibPar.exe --num-workers=$d 40  27.18s user 0.49s system 684% cpu 4.042 total
+➜  N=37; hyperfine "FibPar.exe --num-workers=1 $N" "FibPar.exe --num-workers=2 $N" "FibPar.exe --num-workers=4 $N" "FibPar.exe --num-workers=8 $N"
+Benchmark 1: FibPar.exe --num-workers=1 37
+  Time (mean ± σ):     897.8 ms ±   8.3 ms    [User: 894.3 ms, System: 2.7 ms]
+  Range (min … max):   889.8 ms … 908.4 ms    10 runs
+
+Benchmark 2: FibPar.exe --num-workers=2 37
+  Time (mean ± σ):     862.6 ms ±   3.8 ms    [User: 1709.9 ms, System: 4.6 ms]
+  Range (min … max):   858.6 ms … 869.8 ms    10 runs
+
+Benchmark 3: FibPar.exe --num-workers=4 37
+  Time (mean ± σ):     528.5 ms ±   2.1 ms    [User: 2064.4 ms, System: 8.8 ms]
+  Range (min … max):   525.9 ms … 532.0 ms    10 runs
+
+Benchmark 4: FibPar.exe --num-workers=8 37
+  Time (mean ± σ):     780.6 ms ± 351.1 ms    [User: 5359.7 ms, System: 110.4 ms]
+  Range (min … max):   602.0 ms … 1740.9 ms    10 runs
+
+  Warning: Statistical outliers were detected. Consider re-running this benchmark on a quiet PC without any interferences from other programs. It might help to use the '--warmup' or '--prepare' options.
+
+Summary
+  'FibPar.exe --num-workers=4 37' ran
+    1.48 ± 0.66 times faster than 'FibPar.exe --num-workers=8 37'
+    1.63 ± 0.01 times faster than 'FibPar.exe --num-workers=2 37'
+    1.70 ± 0.02 times faster than 'FibPar.exe --num-workers=1 37'
 ```
 
 In the following, the `fib_par` example of domainslib
@@ -89,25 +119,26 @@ has been modified as above
 - to give same numerical result as the `par-ml` versions.
 
 ```sh
-➜  domainslib git:(master) ✗ for d in 1 2 4 8; do time fib_par.exe $d 40; done
-fib(40) = 102334155
-fib_par.exe $d 40  47.10s user 0.12s system 99% cpu 47.223 total
-fib(40) = 102334155
-fib_par.exe $d 40  60.76s user 0.10s system 199% cpu 30.450 total
-fib(40) = 102334155
-fib_par.exe $d 40  83.00s user 0.13s system 397% cpu 20.890 total
-fib(40) = 102334155
-fib_par.exe $d 40  193.91s user 1.12s system 707% cpu 27.579 total
-```
+➜  N=37; hyperfine "fib_par.exe 1 $N" "fib_par.exe 2 $N" "fib_par.exe 4 $N" "fib_par.exe 8 $N"
+Benchmark 1: fib_par.exe 1 37
+  Time (mean ± σ):      7.027 s ±  0.059 s    [User: 7.006 s, System: 0.018 s]
+  Range (min … max):    6.966 s …  7.098 s    10 runs
 
-```sh
-➜  domainslib git:(master) ✗ for d in 1 2 4 8; do time fib_par.exe $d 40; done
-fib(40) = 102334155
-fib_par.exe $d 40  48.28s user 0.08s system 99% cpu 48.365 total
-fib(40) = 102334155
-fib_par.exe $d 40  61.77s user 0.07s system 199% cpu 30.943 total
-fib(40) = 102334155
-fib_par.exe $d 40  82.72s user 0.13s system 397% cpu 20.824 total
-fib(40) = 102334155
-fib_par.exe $d 40  193.92s user 1.12s system 717% cpu 27.172 total
+Benchmark 2: fib_par.exe 2 37
+  Time (mean ± σ):      4.690 s ±  0.128 s    [User: 9.351 s, System: 0.016 s]
+  Range (min … max):    4.617 s …  5.042 s    10 runs
+
+Benchmark 3: fib_par.exe 4 37
+  Time (mean ± σ):      3.087 s ±  0.061 s    [User: 12.275 s, System: 0.019 s]
+  Range (min … max):    3.020 s …  3.181 s    10 runs
+
+Benchmark 4: fib_par.exe 8 37
+  Time (mean ± σ):      5.011 s ±  0.127 s    [User: 36.348 s, System: 0.272 s]
+  Range (min … max):    4.861 s …  5.257 s    10 runs
+
+Summary
+  'fib_par.exe 4 37' ran
+    1.52 ± 0.05 times faster than 'fib_par.exe 2 37'
+    1.62 ± 0.05 times faster than 'fib_par.exe 8 37'
+    2.28 ± 0.05 times faster than 'fib_par.exe 1 37'
 ```
