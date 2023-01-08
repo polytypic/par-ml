@@ -47,6 +47,11 @@ TODO:
 
 These have been run on Apple M1 with 4 + 4 cores (in normal mode).
 
+> As an aside, let's assume cache size differences do not matter. As Apple M1
+> has 4 cores at 3228 MHz and 4 cores at 2064 MHz, one could estimate that the
+> best possible parallel speed up would be (4 \* (3228 + 2064)) / 3228 or
+> roughly 6.5.
+
 ```sh
 ➜  P=FibFiber.exe; N=37; hyperfine "$P --num-workers=1 $N" "$P --num-workers=2 $N" "$P --num-workers=4 $N" "$P --num-workers=8 $N"
 Benchmark 1: FibFiber.exe --num-workers=1 37
