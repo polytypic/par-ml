@@ -17,7 +17,6 @@ type 'a t = {
   p4 : int;
   p5 : int;
   p6 : int;
-  p7 : int;
   lo : int Atomic.t;
   (* Only the owner mutates the rest: *)
   mutable elems : 'a array;
@@ -27,6 +26,7 @@ type 'a t = {
   m4 : int;
   m5 : int;
   m6 : int;
+  m7 : int;
   mutable lo_cache : int;
   mutable hi : int;
   s1 : int;
@@ -58,7 +58,6 @@ let make () =
       p4 = 0;
       p5 = 0;
       p6 = 0;
-      p7 = 0;
       lo = Atomic.make 0;
       elems = null ();
       m1 = 0;
@@ -67,6 +66,7 @@ let make () =
       m4 = 0;
       m5 = 0;
       m6 = 0;
+      m7 = 0;
       lo_cache = 0;
       hi = 0;
       s1 = 0;
