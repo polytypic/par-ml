@@ -1,4 +1,5 @@
 [@@@alert "-unstable"]
+[@@@ocaml.warning "-69"] (* Disable unused field warning. *)
 
 let null _ = Obj.magic () [@@inline]
 let impossible () = failwith "impossible"
@@ -16,9 +17,107 @@ let handler = {Effect.Deep.effc}
 
 (* *)
 
+type state = {
+  p1 : int;
+  p2 : int;
+  p3 : int;
+  p4 : int;
+  p5 : int;
+  p6 : int;
+  p7 : int;
+  p8 : int;
+  p9 : int;
+  pA : int;
+  pB : int;
+  pC : int;
+  pD : int;
+  pE : int;
+  mutable num_waiters_non_zero : bool;
+  m1 : int;
+  m2 : int;
+  m3 : int;
+  m4 : int;
+  m5 : int;
+  m6 : int;
+  m7 : int;
+  m8 : int;
+  m9 : int;
+  mA : int;
+  mB : int;
+  mC : int;
+  mD : int;
+  mE : int;
+  mF : int;
+  mutable num_waiters : int;
+  s1 : int;
+  s2 : int;
+  s3 : int;
+  s4 : int;
+  s5 : int;
+  s6 : int;
+  s7 : int;
+  s8 : int;
+  s9 : int;
+  sA : int;
+  sB : int;
+  sC : int;
+  sD : int;
+  sE : int;
+  sF : int;
+}
+
+let state =
+  {
+    p1 = 0;
+    p2 = 0;
+    p3 = 0;
+    p4 = 0;
+    p5 = 0;
+    p6 = 0;
+    p7 = 0;
+    p8 = 0;
+    p9 = 0;
+    pA = 0;
+    pB = 0;
+    pC = 0;
+    pD = 0;
+    pE = 0;
+    num_waiters_non_zero = false;
+    m1 = 0;
+    m2 = 0;
+    m3 = 0;
+    m4 = 0;
+    m5 = 0;
+    m6 = 0;
+    m7 = 0;
+    m8 = 0;
+    m9 = 0;
+    mA = 0;
+    mB = 0;
+    mC = 0;
+    mD = 0;
+    mE = 0;
+    mF = 0;
+    num_waiters = 0;
+    s1 = 0;
+    s2 = 0;
+    s3 = 0;
+    s4 = 0;
+    s5 = 0;
+    s6 = 0;
+    s7 = 0;
+    s8 = 0;
+    s9 = 0;
+    sA = 0;
+    sB = 0;
+    sC = 0;
+    sD = 0;
+    sE = 0;
+    sF = 0;
+  }
+
 let mutex = Mutex.create ()
 let condition = Condition.create ()
-let num_waiters = ref 0 (* TODO: this is non-scalable *)
 
 type worker = (unit -> unit) DCYL.t
 
@@ -42,28 +141,36 @@ let rec loop dcyl =
   Effect.Deep.try_with work () handler;
   loop dcyl
 
-let rec main wr = try loop wr with DCYL.Empty -> try_steal wr
+let next_index i =
+  let i = i + 1 in
+  if i < Array.length workers then i else 0
+  [@@inline]
 
-and try_steal wr =
-  try_steal_loop wr (((Domain.self () :> int) + 1) mod Array.length workers)
+let first_index () = next_index (Domain.self () :> int)
+
+let rec main wr = try loop wr with DCYL.Empty -> try_steal wr
+and try_steal wr = try_steal_loop wr (first_index ())
 
 and try_steal_loop wr i =
-  let victim = workers.(i) in
+  let victim = Array.unsafe_get workers i in
   if victim == wr then wait wr
   else
     match DCYL.steal victim with
     | work ->
       Effect.Deep.try_with work () handler;
       main wr
-    | exception DCYL.Empty ->
-      try_steal_loop wr ((i + 1) mod Array.length workers)
+    | exception DCYL.Empty -> try_steal_loop wr (next_index i)
 
 and wait wr =
-  if wr != workers.(0) then begin
+  if wr != Array.unsafe_get workers 0 then begin
     Mutex.lock mutex;
-    incr num_waiters;
+    let n = state.num_waiters + 1 in
+    state.num_waiters <- n;
+    if n = 1 then state.num_waiters_non_zero <- true;
     Condition.wait condition mutex;
-    decr num_waiters;
+    let n = state.num_waiters - 1 in
+    state.num_waiters <- n;
+    if n = 0 then state.num_waiters_non_zero <- false;
     Mutex.unlock mutex;
     try_steal wr
   end
@@ -106,7 +213,7 @@ let worker () = workers.((Domain.self () :> int)) [@@inline]
 
 let push wr work =
   DCYL.push wr work;
-  if !num_waiters <> 0 then Condition.signal condition
+  if state.num_waiters_non_zero then Condition.signal condition
   [@@inline]
 
 (* *)
