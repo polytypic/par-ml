@@ -45,7 +45,7 @@ TODO:
 
 ## Benchmarks to be taken with plenty of salt
 
-These have been run on Apple M1 with 4 + 4 cores in low power mode.
+These have been run on Apple M1 with 4 + 4 cores (in normal mode).
 
 ```sh
 ➜  P=FibFiber.exe; N=37; hyperfine "$P --num-workers=1 $N" "$P --num-workers=2 $N" "$P --num-workers=4 $N" "$P --num-workers=8 $N"
