@@ -10,6 +10,10 @@ let condition = Condition.create ()
 
 (* *)
 
+let result_ready = Multicore.copy_as_padded (ref true)
+
+(* *)
+
 type 'a continuation = ('a, unit) Effect.Deep.continuation
 type _ Effect.t += Suspend : ('a continuation -> unit) -> 'a Effect.t
 
@@ -17,7 +21,10 @@ let effc (type a) : a Effect.t -> _ = function
   | Suspend ef -> Some ef
   | _ -> None
 
-let handler = Multicore.copy_as_padded {Effect.Deep.effc}
+let handler =
+  Multicore.copy_as_padded {Effect.Deep.retc = ignore; exnc = raise; effc}
+
+let handle ef x = Effect.Deep.match_with ef x handler [@@inline]
 
 (* *)
 
@@ -38,8 +45,7 @@ type 'a st =
   | Return of 'a
   | Raise of exn
 
-and worker = work DCYL.t
-and work = W : 'a st Atomic.t -> work
+and stack = Work : 'a st Atomic.t * stack -> stack | Null : stack
 
 (* *)
 
@@ -59,7 +65,9 @@ let workers =
     |> Option.map (Int.min (Domain.recommended_domain_count ()))
     |> Option.value ~default:(Domain.recommended_domain_count ())
   in
-  Multicore.copy_as_padded (Array.init num_workers (fun _ -> DCYL.make ()))
+  Multicore.copy_as_padded
+    (Array.init num_workers (fun _ ->
+         Multicore.copy_as_padded (Atomic.make Null)))
 
 let rec dispatch res = function
   | Join (k, ws) ->
@@ -72,20 +80,14 @@ let rec dispatch res = function
     dispatch res ws
   | _ -> res
 
-let run_fiber st th =
+let run_under_current_handler st th =
   let res = match th () with x -> Return x | exception e -> Raise e in
   dispatch res (Atomic.exchange st res)
+  [@@inline]
 
-let doit (W st) =
-  match Atomic.get st with
-  | Initial th as was ->
-    if Atomic.compare_and_set st was Running then run_fiber st th |> ignore
-  | _ -> ()
-
-let rec loop dcyl =
-  let work = DCYL.pop dcyl in
-  Effect.Deep.try_with doit work handler;
-  loop dcyl
+let run_with_global_handler st th =
+  handle (fun th -> run_under_current_handler st th |> ignore) th
+  [@@inline]
 
 let next_index i =
   let i = i + 1 in
@@ -94,31 +96,64 @@ let next_index i =
 
 let first_index () = next_index (Domain.self () :> int) [@@inline]
 
-let add_waiter () =
-  let n = !num_waiters + 1 in
-  num_waiters := n;
-  if n = 1 then num_waiters_non_zero := true;
-  Condition.wait condition mutex;
-  let n = !num_waiters - 1 in
-  num_waiters := n;
-  if n = 0 then num_waiters_non_zero := false
-
-let rec main wr = try loop wr with DCYL.Empty -> try_steal wr (first_index ())
+let rec main wr =
+  match Atomic.get wr with
+  | Work (st, next) as top ->
+    if Atomic.compare_and_set wr top next then begin
+      match Atomic.get st with
+      | Initial th as was when Atomic.compare_and_set st was Running ->
+        if Null != next && !num_waiters_non_zero then Condition.signal condition;
+        run_with_global_handler st th
+      | _ -> ()
+    end;
+    main wr
+  | Null -> try_steal wr (first_index ())
 
 and try_steal wr i =
   let victim = Array.unsafe_get workers i in
-  if victim == wr then wait wr i
-  else
-    match DCYL.steal victim with
-    | work ->
-      Effect.Deep.try_with doit work handler;
+  if victim == wr then wait wr i else try_steal_from wr i victim
+
+and try_steal_from wr i victim =
+  match Atomic.get victim with
+  | Work (st1, Work (st2, next)) as top -> begin
+    match Atomic.get st2 with
+    | Initial th as was when Atomic.compare_and_set st2 was Running ->
+      Atomic.get_compare_and_set victim top (Work (st1, next));
+      run_with_global_handler st2 th;
       main wr
-    | exception DCYL.Empty -> try_steal wr (next_index i)
+    | _ -> begin
+      match Atomic.get st1 with
+      | Initial th as was when Atomic.compare_and_set st1 was Running ->
+        Atomic.get_compare_and_set victim top next;
+        run_with_global_handler st1 th;
+        main wr
+      | _ ->
+        Atomic.get_compare_and_set victim top next;
+        try_steal_from wr i victim
+    end
+  end
+  | Work (st, next) as top -> begin
+    match Atomic.get st with
+    | Initial th as was when Atomic.compare_and_set st was Running ->
+      Atomic.get_compare_and_set victim top next;
+      run_with_global_handler st th;
+      main wr
+    | _ ->
+      Atomic.get_compare_and_set victim top next;
+      try_steal_from wr i victim
+  end
+  | Null -> try_steal wr (next_index i)
 
 and wait wr i =
-  if i <> 0 then begin
+  if i <> 0 || not !result_ready then begin
     Mutex.lock mutex;
-    add_waiter ();
+    let n = !num_waiters + 1 in
+    num_waiters := n;
+    if n = 1 then num_waiters_non_zero := true;
+    if i <> 0 || not !result_ready then Condition.wait condition mutex;
+    let n = !num_waiters - 1 in
+    num_waiters := n;
+    if n = 0 then num_waiters_non_zero := false;
     Mutex.unlock mutex;
     try_steal wr (next_index i)
   end
@@ -134,41 +169,57 @@ let () =
     |> ignore
   done
 
+(* *)
+
 let worker () = workers.((Domain.self () :> int)) [@@inline]
 
-let push wr work =
-  DCYL.push wr work;
-  if !num_waiters_non_zero then Condition.signal condition
+let rec push wr st =
+  let top = Atomic.get wr in
+  if Atomic.compare_and_set wr top (Work (st, top)) then begin
+    if !num_waiters_non_zero then Condition.signal condition
+  end
+  else push wr st
+  [@@inline]
+
+let drop_if wr st' =
+  match Atomic.get wr with
+  | Work (st, next) as top when st == Obj.magic st' ->
+    Atomic.compare_and_set wr top next |> ignore
+  | _ -> ()
   [@@inline]
 
 (* *)
 
 let run ef =
   if 0 <> (Domain.self () :> int) then failwith "only main domain may call run";
-  let res = ref (null ()) in
-  Effect.Deep.try_with
+  if not !result_ready then failwith "run is not re-entrant";
+  result_ready := false;
+  let wr = Array.unsafe_get workers 0 in
+  let result = ref (null ()) in
+  handle
     (fun ef ->
-      match ef () with v -> res := Ok v | exception e -> res := Error e)
-    ef handler;
-  while !res == null () do
-    main (Array.unsafe_get workers 0)
-  done;
-  Result.run !res
+      (result := match ef () with v -> Ok v | exception e -> Error e);
+      Mutex.lock mutex;
+      result_ready := true;
+      Condition.broadcast condition;
+      Mutex.unlock mutex)
+    ef;
+  main wr;
+  Result.run !result
 
 (* *)
 
 let par tha thb =
-  let wr = worker () in
-  let i = DCYL.mark wr in
   let st = Atomic.make @@ Initial tha in
-  push wr (W st);
+  let wr = worker () in
+  push wr st;
   match thb () with
   | y -> begin
     match Atomic.exchange st Running with
     | Return x -> (x, y)
     | Raise e -> raise e
     | Initial tha ->
-      DCYL.drop_at wr i;
+      drop_if wr st;
       (tha (), y)
     | _running ->
       ( Continuation.suspend (fun k ->
@@ -183,7 +234,7 @@ let par tha thb =
       match Atomic.exchange st Running with
       | Return _ -> null ()
       | Raise e -> raise e
-      | Initial _ -> DCYL.drop_at wr i |> null
+      | Initial _ -> drop_if wr st |> null
       | _running ->
         Continuation.suspend (fun k ->
             match Atomic.exchange st (Join (k, Running)) with
@@ -196,28 +247,26 @@ let par tha thb =
 (* *)
 
 module Fiber = struct
-  type 'a t = worker * DCYL.pos * 'a st Atomic.t
+  type 'a t = 'a st Atomic.t
 
   let spawn th =
-    let wr = worker () in
-    let i = DCYL.mark wr in
     let st = Atomic.make @@ Initial th in
-    let fiber = (wr, i, st) in
-    push wr (W st);
-    fiber
+    let wr = worker () in
+    push wr st;
+    st
 
-  let rec join ((wr', i, st) as fiber) =
+  let rec join st =
     match Atomic.get st with
     | Initial th as t ->
       if Atomic.compare_and_set st t Running then begin
         let wr = worker () in
-        if wr == wr' then DCYL.drop_at wr i;
-        match run_fiber st th with
+        drop_if wr st;
+        match run_under_current_handler st th with
         | Return x -> x
         | Raise e -> raise e
         | _ -> impossible ()
       end
-      else join fiber
+      else join st
     | Return x -> x
     | Raise e -> raise e
     | was ->

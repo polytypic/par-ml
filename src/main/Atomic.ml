@@ -1,3 +1,5 @@
 include Stdlib.Atomic
 
-let fence atomic = fetch_and_add atomic 0 |> ignore [@@inline]
+let get_compare_and_set atomic expect value =
+  if get atomic == expect then compare_and_set atomic expect value |> ignore
+  [@@inline]
