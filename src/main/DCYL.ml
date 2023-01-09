@@ -172,30 +172,21 @@ let pop dcyl =
 
 let drop_at dcyl at =
   let hi = dcyl.hi - 1 in
-  if hi <> at then begin
-    false
-  end
-  else begin
+  if hi = at then begin
     dcyl.hi <- hi;
     (* Ensure `hi` is written before reading `lo` to stop thieves. *)
     let lo = Atomic.fetch_and_add dcyl.lo 0 in
     if dcyl.lo_cache <> lo then clear_stolen dcyl lo;
-    if hi < lo then begin
-      dcyl.hi <- hi + 1;
-      false
-    end
+    if hi < lo then dcyl.hi <- hi + 1
     else
       let elems = dcyl.elems in
       let mask = mask_of elems in
-      if lo < hi then begin
-        Array.unsafe_set elems (hi land mask) (null ());
-        true
-      end
-      else
+      if lo < hi then Array.unsafe_set elems (hi land mask) (null ())
+      else begin
         (* Compete with thieves for last element. *)
-        let got = Atomic.compare_and_set dcyl.lo lo (lo + 1) in
-        dcyl.hi <- hi + 1;
-        got
+        Atomic.compare_and_set dcyl.lo lo (lo + 1) |> ignore;
+        dcyl.hi <- hi + 1
+      end
   end
 
 let rec steal dcyl =

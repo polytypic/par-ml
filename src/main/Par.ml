@@ -14,7 +14,28 @@ let effc (type a) : a Effect.t -> _ = function
   | _ -> None
 
 let handler = {Effect.Deep.effc}
-let handle work = Effect.Deep.try_with work () handler [@@inline]
+
+(* *)
+
+module Continuation = struct
+  type 'a t = 'a continuation
+
+  let suspend ef = Effect.perform (Suspend ef) [@@inline]
+  let return k v = Effect.Deep.continue k v [@@inline]
+  let raise k e = Effect.Deep.discontinue k e [@@inline]
+end
+
+(* *)
+
+type 'a st =
+  | Initial of (unit -> 'a)
+  | Join of 'a Continuation.t * 'a st
+  | Running
+  | Ok of 'a
+  | Error of exn
+
+and worker = work DCYL.t
+and work = W : 'a st Atomic.t -> work
 
 (* *)
 
@@ -120,8 +141,6 @@ let state =
 let mutex = Mutex.create ()
 let condition = Condition.create ()
 
-type worker = (unit -> unit) DCYL.t
-
 let workers =
   let num_workers =
     Sys.argv
@@ -137,9 +156,30 @@ let workers =
   in
   Array.init num_workers (fun _ -> null ())
 
+let rec dispatch res = function
+  | Join (k, ws) ->
+    begin
+      match res with
+      | Ok x -> Continuation.return k x
+      | Error e -> Continuation.raise k e
+      | _ -> impossible ()
+    end;
+    dispatch res ws
+  | _ -> res
+
+let run_fiber st th =
+  let res = match th () with x -> Ok x | exception e -> Error e in
+  dispatch res (Atomic.exchange st res)
+
+let doit (W st) =
+  match Atomic.get st with
+  | Initial th as was ->
+    if Atomic.compare_and_set st was Running then run_fiber st th |> ignore
+  | _ -> ()
+
 let rec loop dcyl =
   let work = DCYL.pop dcyl in
-  handle work;
+  Effect.Deep.try_with doit work handler;
   loop dcyl
 
 let next_index i =
@@ -166,7 +206,7 @@ and try_steal wr i =
   else
     match DCYL.steal victim with
     | work ->
-      handle work;
+      Effect.Deep.try_with doit work handler;
       main wr
     | exception DCYL.Empty -> try_steal wr (next_index i)
 
@@ -221,21 +261,13 @@ let push wr work =
 
 (* *)
 
-module Continuation = struct
-  type 'a t = 'a continuation
-
-  let suspend ef = Effect.perform (Suspend ef) [@@inline]
-  let return k v = Effect.Deep.continue k v [@@inline]
-  let raise k e = Effect.Deep.discontinue k e [@@inline]
-end
-
-(* *)
-
 let run ef =
   if 0 <> (Domain.self () :> int) then failwith "only main domain may call run";
   let res = ref (null ()) in
-  handle (fun () ->
-      match ef () with v -> res := Ok v | exception e -> res := Error e);
+  Effect.Deep.try_with
+    (fun ef ->
+      match ef () with v -> res := Result.Ok v | exception e -> res := Error e)
+    ef handler;
   while !res == null () do
     main (Array.unsafe_get workers 0)
   done;
@@ -244,46 +276,21 @@ let run ef =
 (* *)
 
 let par tha thb =
-  let open struct
-    type 'a par =
-      | Initial of (unit -> 'a)
-      | Running
-      | Join of 'a Continuation.t
-      | Ok of 'a
-      | Error of exn
-  end in
-  let st = Atomic.make @@ Initial tha in
-  let work () =
-    match Atomic.exchange st Running with
-    | Initial tha -> begin
-      match tha () with
-      | x -> begin
-        match Atomic.exchange st (Ok x) with
-        | Join k -> Continuation.return k x
-        | _ -> ()
-      end
-      | exception e -> begin
-        match Atomic.exchange st (Error e) with
-        | Join k -> Continuation.raise k e
-        | _ -> ()
-      end
-    end
-    | _ -> ()
-  in
   let wr = worker () in
   let i = DCYL.mark wr in
-  push wr work;
+  let st = Atomic.make @@ Initial tha in
+  push wr (W st);
   match thb () with
   | y -> begin
     match Atomic.exchange st Running with
     | Ok x -> (x, y)
     | Error e -> raise e
     | Initial tha ->
-      DCYL.drop_at wr i |> ignore;
+      DCYL.drop_at wr i;
       (tha (), y)
     | _running ->
       ( Continuation.suspend (fun k ->
-            match Atomic.exchange st (Join k) with
+            match Atomic.exchange st (Join (k, Running)) with
             | Ok x -> Continuation.return k x
             | Error e -> Continuation.raise k e
             | _ -> ()),
@@ -297,7 +304,7 @@ let par tha thb =
       | Initial _ -> DCYL.drop_at wr i |> null
       | _running ->
         Continuation.suspend (fun k ->
-            match Atomic.exchange st (Join k) with
+            match Atomic.exchange st (Join (k, Running)) with
             | Ok _ -> Continuation.return k (null ())
             | Error e -> Continuation.raise k e
             | _ -> ())
@@ -307,64 +314,38 @@ let par tha thb =
 (* *)
 
 module Fiber = struct
-  type 'a st =
-    | Initial of (unit -> 'a) * worker * DCYL.pos
-    | Running
-    | Join of 'a Continuation.t * 'a st
-    | Ok of 'a
-    | Error of exn
-
-  type 'a t = 'a st Atomic.t
-
-  let rec dispatch res = function
-    | Join (k, ws) ->
-      begin
-        match res with
-        | Ok x -> Continuation.return k x
-        | Error e -> Continuation.raise k e
-        | _ -> impossible ()
-      end;
-      dispatch res ws
-    | _ -> res
-
-  let run st th =
-    let res = match th () with x -> Ok x | exception e -> Error e in
-    dispatch res (Atomic.exchange st res)
+  type 'a t = worker * DCYL.pos * 'a st Atomic.t
 
   let spawn th =
     let wr = worker () in
-    let st = Atomic.make @@ Initial (th, wr, DCYL.mark wr) in
-    let work () =
-      match Atomic.get st with
-      | Initial (th, _, _) as t ->
-        if Atomic.compare_and_set st t Running then run st th |> ignore
-      | _ -> ()
-    in
-    push wr work;
-    st
+    let i = DCYL.mark wr in
+    let st = Atomic.make @@ Initial th in
+    let fiber = (wr, i, st) in
+    push wr (W st);
+    fiber
 
-  let rec join st =
+  let rec join ((wr', i, st) as fiber) =
     match Atomic.get st with
-    | Initial (th, wr', i) as t ->
+    | Initial th as t ->
       if Atomic.compare_and_set st t Running then begin
         let wr = worker () in
-        if wr == wr' then DCYL.drop_at wr i |> ignore;
-        match run st th with
+        if wr == wr' then DCYL.drop_at wr i;
+        match run_fiber st th with
         | Ok x -> x
         | Error e -> raise e
         | _ -> impossible ()
       end
-      else join st
+      else join fiber
     | Ok x -> x
     | Error e -> raise e
-    | (Running | Join _) as w ->
+    | was ->
       Continuation.suspend @@ fun k ->
-      let rec loop w =
-        if not (Atomic.compare_and_set st w (Join (k, w))) then
+      let rec loop was =
+        if not (Atomic.compare_and_set st was (Join (k, was))) then
           match Atomic.get st with
           | Ok x -> Continuation.return k x
           | Error e -> Continuation.raise k e
           | was -> loop was
       in
-      loop w
+      loop was
 end

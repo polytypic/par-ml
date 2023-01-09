@@ -20,7 +20,7 @@ val pop : 'a t -> 'a
 val mark : 'a t -> pos
 (** Get position of next [push]. *)
 
-val drop_at : 'a t -> pos -> bool
+val drop_at : 'a t -> pos -> unit
 (** Attempt to drop element at given position from the deque.  Only the owner
     may call this and the position must be from the deque. *)
 
