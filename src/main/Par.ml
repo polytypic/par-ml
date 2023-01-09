@@ -38,13 +38,11 @@ type 'a st =
   | Return of 'a
   | Raise of exn
 
-and worker = work DCYL.t
-and work = W : 'a st Atomic.t -> work
+and stack = Work : 'a st Atomic.t * stack -> stack | Null : stack
 
 (* *)
 
-let num_waiters_non_zero = Multicore.copy_as_padded (ref false)
-let num_waiters = Multicore.copy_as_padded (ref 0)
+let shared = Multicore.copy_as_padded (ref Null)
 
 let workers =
   let num_workers =
@@ -59,7 +57,8 @@ let workers =
     |> Option.map (Int.min (Domain.recommended_domain_count ()))
     |> Option.value ~default:(Domain.recommended_domain_count ())
   in
-  Multicore.copy_as_padded (Array.init num_workers (fun _ -> DCYL.make ()))
+  Multicore.copy_as_padded
+    (Array.init num_workers (fun _ -> Multicore.copy_as_padded (ref Null)))
 
 let rec dispatch res = function
   | Join (k, ws) ->
@@ -76,99 +75,111 @@ let run_fiber st th =
   let res = match th () with x -> Return x | exception e -> Raise e in
   dispatch res (Atomic.exchange st res)
 
-let doit (W st) =
+let doit st =
   match Atomic.get st with
   | Initial th as was ->
     if Atomic.compare_and_set st was Running then run_fiber st th |> ignore
   | _ -> ()
 
-let rec loop dcyl =
-  let work = DCYL.pop dcyl in
-  Effect.Deep.try_with doit work handler;
-  loop dcyl
-
-let next_index i =
-  let i = i + 1 in
-  if i < Multicore.length_of_padded_array workers then i else 0
-  [@@inline]
-
-let first_index () = next_index (Domain.self () :> int) [@@inline]
-
-let add_waiter () =
-  let n = !num_waiters + 1 in
-  num_waiters := n;
-  if n = 1 then num_waiters_non_zero := true;
-  Condition.wait condition mutex;
-  let n = !num_waiters - 1 in
-  num_waiters := n;
-  if n = 0 then num_waiters_non_zero := false
-
-let rec main wr = try loop wr with DCYL.Empty -> try_steal wr (first_index ())
-
-and try_steal wr i =
-  let victim = Array.unsafe_get workers i in
-  if victim == wr then wait wr i
-  else
-    match DCYL.steal victim with
-    | work ->
-      Effect.Deep.try_with doit work handler;
-      main wr
-    | exception DCYL.Empty -> try_steal wr (next_index i)
-
-and wait wr i =
-  if i <> 0 then begin
+let rec main wr result = function
+  | Work (st, next) ->
+    if next != Null && !shared == Null then begin
+      Mutex.lock mutex;
+      if !shared == Null then begin
+        shared := next;
+        Condition.signal condition;
+        Mutex.unlock mutex;
+        wr := Null
+      end
+      else begin
+        Mutex.unlock mutex;
+        wr := next
+      end
+    end
+    else wr := next;
+    Effect.Deep.try_with doit st handler;
+    main wr result !wr
+  | Null ->
+    wr := Null;
     Mutex.lock mutex;
-    add_waiter ();
+    while !shared == Null && !result == null () do
+      Condition.wait condition mutex
+    done;
+    let top = !shared in
+    shared := Null;
     Mutex.unlock mutex;
-    try_steal wr (next_index i)
-  end
+    if !result == null () then main wr result top
 
 let () =
+  let always_null = Multicore.copy_as_padded (ref (null ())) in
+
   for _ = 2 to Multicore.length_of_padded_array workers do
     Domain.spawn (fun () ->
         let i = (Domain.self () :> int) in
         if Multicore.length_of_padded_array workers <= i then
           failwith "add_worker: not sequential";
         let wr = Array.unsafe_get workers i in
-        main wr)
+        main wr always_null !wr)
     |> ignore
   done
 
 let worker () = workers.((Domain.self () :> int)) [@@inline]
 
 let push wr work =
-  DCYL.push wr work;
-  if !num_waiters_non_zero then Condition.signal condition
+  let next = !wr in
+  if next != Null && !shared == Null then begin
+    Mutex.lock mutex;
+    if !shared == Null then begin
+      shared := next;
+      Condition.signal condition;
+      Mutex.unlock mutex;
+      wr := Work (work, Null)
+    end
+    else begin
+      Mutex.unlock mutex;
+      wr := Work (work, next)
+    end
+  end
+  else wr := Work (work, next)
   [@@inline]
+
+let drop_if wr st' =
+  match !wr with
+  | Work (st, next) when st == Obj.magic st' -> wr := next
+  | _ -> ()
 
 (* *)
 
 let run ef =
   if 0 <> (Domain.self () :> int) then failwith "only main domain may call run";
-  let res = ref (null ()) in
+  let result = ref (null ()) in
   Effect.Deep.try_with
     (fun ef ->
-      match ef () with v -> res := Ok v | exception e -> res := Error e)
+      let r = match ef () with v -> Ok v | exception e -> Error e in
+      Mutex.lock mutex;
+      result := r;
+      Condition.broadcast condition;
+      Mutex.unlock mutex)
     ef handler;
-  while !res == null () do
-    main (Array.unsafe_get workers 0)
-  done;
-  Result.run !res
+  let wr = Array.unsafe_get workers 0 in
+  main wr result !wr;
+  let res = !result in
+  result := null ();
+  Result.run res
 
 (* *)
 
 let par tha thb =
-  let wr = worker () in
-  let i = DCYL.mark wr in
   let st = Atomic.make @@ Initial tha in
-  push wr (W st);
+  let wr = worker () in
+  push wr st;
   match thb () with
   | y -> begin
     match Atomic.exchange st Running with
     | Return x -> (x, y)
     | Raise e -> raise e
     | Initial tha ->
-      DCYL.drop_at wr i;
+      drop_if wr st;
       (tha (), y)
     | _running ->
       ( Continuation.suspend (fun k ->
@@ -183,7 +194,7 @@ let par tha thb =
       match Atomic.exchange st Running with
       | Return _ -> null ()
       | Raise e -> raise e
-      | Initial _ -> DCYL.drop_at wr i |> null
+      | Initial _ -> drop_if wr st |> null
       | _running ->
         Continuation.suspend (fun k ->
             match Atomic.exchange st (Join (k, Running)) with
@@ -196,28 +207,26 @@ let par tha thb =
 (* *)
 
 module Fiber = struct
-  type 'a t = worker * DCYL.pos * 'a st Atomic.t
+  type 'a t = 'a st Atomic.t
 
   let spawn th =
-    let wr = worker () in
-    let i = DCYL.mark wr in
     let st = Atomic.make @@ Initial th in
-    let fiber = (wr, i, st) in
-    push wr (W st);
-    fiber
+    let wr = worker () in
+    push wr st;
+    st
 
-  let rec join ((wr', i, st) as fiber) =
+  let rec join st =
     match Atomic.get st with
     | Initial th as t ->
       if Atomic.compare_and_set st t Running then begin
         let wr = worker () in
-        if wr == wr' then DCYL.drop_at wr i;
+        drop_if wr st;
         match run_fiber st th with
         | Return x -> x
         | Raise e -> raise e
         | _ -> impossible ()
       end
-      else join fiber
+      else join st
     | Return x -> x
     | Raise e -> raise e
     | was ->
