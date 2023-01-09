@@ -44,6 +44,12 @@ Compared to [domainslib](https://github.com/ocaml-multicore/domainslib):
   [non-atomic flag](https://github.com/polytypic/par-ml/blob/f4dd2bbfdb5384bfbf95e9e4117d880c95308a47/src/main/Par.ml#L57)
   is used.
 
+It would seem that the ability to drop work items from the owned deque, and
+thereby avoid accumulation of stale work items, and, at the same time, ability
+to avoid capturing continuations, can provide major performance benefits
+(roughly 5x) in cases where it applies. Other optimizations provide a small
+benefit (roughly 2x).
+
 TODO:
 
 - Is the
