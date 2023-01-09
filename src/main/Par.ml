@@ -14,6 +14,7 @@ let effc (type a) : a Effect.t -> _ = function
   | _ -> None
 
 let handler = {Effect.Deep.effc}
+let handle work = Effect.Deep.try_with work () handler [@@inline]
 
 (* *)
 
@@ -138,7 +139,7 @@ let workers =
 
 let rec loop dcyl =
   let work = DCYL.pop dcyl in
-  Effect.Deep.try_with work () handler;
+  handle work;
   loop dcyl
 
 let next_index i =
@@ -146,33 +147,35 @@ let next_index i =
   if i < Array.length workers then i else 0
   [@@inline]
 
-let first_index () = next_index (Domain.self () :> int)
+let first_index () = next_index (Domain.self () :> int) [@@inline]
 
-let rec main wr = try loop wr with DCYL.Empty -> try_steal wr
-and try_steal wr = try_steal_loop wr (first_index ())
+let add_waiter () =
+  let n = state.num_waiters + 1 in
+  state.num_waiters <- n;
+  if n = 1 then state.num_waiters_non_zero <- true;
+  Condition.wait condition mutex;
+  let n = state.num_waiters - 1 in
+  state.num_waiters <- n;
+  if n = 0 then state.num_waiters_non_zero <- false
 
-and try_steal_loop wr i =
+let rec main wr = try loop wr with DCYL.Empty -> try_steal wr (first_index ())
+
+and try_steal wr i =
   let victim = Array.unsafe_get workers i in
-  if victim == wr then wait wr
+  if victim == wr then wait wr i
   else
     match DCYL.steal victim with
     | work ->
-      Effect.Deep.try_with work () handler;
+      handle work;
       main wr
-    | exception DCYL.Empty -> try_steal_loop wr (next_index i)
+    | exception DCYL.Empty -> try_steal wr (next_index i)
 
-and wait wr =
-  if wr != Array.unsafe_get workers 0 then begin
+and wait wr i =
+  if i <> 0 then begin
     Mutex.lock mutex;
-    let n = state.num_waiters + 1 in
-    state.num_waiters <- n;
-    if n = 1 then state.num_waiters_non_zero <- true;
-    Condition.wait condition mutex;
-    let n = state.num_waiters - 1 in
-    state.num_waiters <- n;
-    if n = 0 then state.num_waiters_non_zero <- false;
+    add_waiter ();
     Mutex.unlock mutex;
-    try_steal wr
+    try_steal wr (next_index i)
   end
 
 let () =
@@ -185,7 +188,7 @@ let () =
     Mutex.lock mutex;
     Array.unsafe_set workers i wr;
     incr num_workers';
-    Condition.broadcast condition;
+    if !num_workers' = Array.length workers then Condition.broadcast condition;
     Mutex.unlock mutex;
     wr
   in
@@ -229,14 +232,14 @@ end
 (* *)
 
 let run ef =
-  let res = Atomic.make (null ()) in
-  let wr = worker () in
-  push wr (fun () ->
-      Atomic.set res (match ef () with v -> Ok v | exception e -> Error e));
-  while Atomic.get res == null () do
-    main wr
+  if 0 <> (Domain.self () :> int) then failwith "only main domain may call run";
+  let res = ref (null ()) in
+  handle (fun () ->
+      match ef () with v -> res := Ok v | exception e -> res := Error e);
+  while !res == null () do
+    main (Array.unsafe_get workers 0)
   done;
-  Atomic.get res |> Result.run
+  !res |> Result.run
 
 (* *)
 

@@ -30,6 +30,7 @@ type 'a t = {
   mF : int;
   mutable lo_cache : int;
   mutable hi : int;
+  s1 : int;
   s2 : int;
   s3 : int;
   s4 : int;
@@ -59,7 +60,7 @@ let null _ = Obj.magic () [@@inline]
 
 let make () =
   {
-    lo = Atomic.make 0;
+    lo = Atomic.make_fat 0;
     elems = Array.make 64 (null ());
     m2 = 0;
     m3 = 0;
@@ -77,6 +78,7 @@ let make () =
     mF = 0;
     lo_cache = 0;
     hi = 0;
+    s1 = 0;
     s2 = 0;
     s3 = 0;
     s4 = 0;
@@ -115,7 +117,7 @@ let grow dcyl =
   done;
   dcyl.elems <- elems'
 
-let mark dcyl = dcyl.hi
+let mark dcyl = dcyl.hi [@@inline]
 
 let push dcyl elem =
   let hi = dcyl.hi in

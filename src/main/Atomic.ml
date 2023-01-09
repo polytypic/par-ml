@@ -20,7 +20,7 @@ type 'a atomic = {
   sF : int;
 }
 
-let make value =
+let make_fat value =
   Obj.magic
     {
       value;
