@@ -30,21 +30,6 @@ type 'a t = {
   mF : int;
   mutable lo_cache : int;
   mutable hi : int;
-  s1 : int;
-  s2 : int;
-  s3 : int;
-  s4 : int;
-  s5 : int;
-  s6 : int;
-  s7 : int;
-  s8 : int;
-  s9 : int;
-  sA : int;
-  sB : int;
-  sC : int;
-  sD : int;
-  sE : int;
-  sF : int;
 }
 
 type pos = int
@@ -59,41 +44,27 @@ let mask_of array =
 let null _ = Obj.magic () [@@inline]
 
 let make () =
-  {
-    lo = Atomic.make_fat 0;
-    elems = Array.make 64 (null ());
-    m2 = 0;
-    m3 = 0;
-    m4 = 0;
-    m5 = 0;
-    m6 = 0;
-    m7 = 0;
-    m8 = 0;
-    m9 = 0;
-    mA = 0;
-    mB = 0;
-    mC = 0;
-    mD = 0;
-    mE = 0;
-    mF = 0;
-    lo_cache = 0;
-    hi = 0;
-    s1 = 0;
-    s2 = 0;
-    s3 = 0;
-    s4 = 0;
-    s5 = 0;
-    s6 = 0;
-    s7 = 0;
-    s8 = 0;
-    s9 = 0;
-    sA = 0;
-    sB = 0;
-    sC = 0;
-    sD = 0;
-    sE = 0;
-    sF = 0;
-  }
+  Multicore.copy_as_padded
+    {
+      lo = Multicore.copy_as_padded (Atomic.make 0);
+      elems = Array.make 64 (null ());
+      m2 = 0;
+      m3 = 0;
+      m4 = 0;
+      m5 = 0;
+      m6 = 0;
+      m7 = 0;
+      m8 = 0;
+      m9 = 0;
+      mA = 0;
+      mB = 0;
+      mC = 0;
+      mD = 0;
+      mE = 0;
+      mF = 0;
+      lo_cache = 0;
+      hi = 0;
+    }
 
 (* This writes `null ()` over stolen elements to allow GC to work.  This is
    called by the owner from `push`, `pop` and `drop_at` when the `lo_cache` is

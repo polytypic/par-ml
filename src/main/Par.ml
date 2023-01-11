@@ -6,6 +6,11 @@ let impossible () = failwith "impossible"
 
 (* *)
 
+let mutex = Mutex.create ()
+let condition = Condition.create ()
+
+(* *)
+
 type 'a continuation = ('a, unit) Effect.Deep.continuation
 type _ Effect.t += Suspend : ('a continuation -> unit) -> 'a Effect.t
 
@@ -13,7 +18,7 @@ let effc (type a) : a Effect.t -> _ = function
   | Suspend ef -> Some ef
   | _ -> None
 
-let handler = {Effect.Deep.effc}
+let handler = Multicore.copy_as_padded {Effect.Deep.effc}
 
 (* *)
 
@@ -39,122 +44,23 @@ and work = W : 'a st Atomic.t -> work
 
 (* *)
 
-type state = {
-  p1 : int;
-  p2 : int;
-  p3 : int;
-  p4 : int;
-  p5 : int;
-  p6 : int;
-  p7 : int;
-  p8 : int;
-  p9 : int;
-  pA : int;
-  pB : int;
-  pC : int;
-  pD : int;
-  pE : int;
-  mutable num_waiters_non_zero : bool;
-  m1 : int;
-  m2 : int;
-  m3 : int;
-  m4 : int;
-  m5 : int;
-  m6 : int;
-  m7 : int;
-  m8 : int;
-  m9 : int;
-  mA : int;
-  mB : int;
-  mC : int;
-  mD : int;
-  mE : int;
-  mF : int;
-  mutable num_waiters : int;
-  s1 : int;
-  s2 : int;
-  s3 : int;
-  s4 : int;
-  s5 : int;
-  s6 : int;
-  s7 : int;
-  s8 : int;
-  s9 : int;
-  sA : int;
-  sB : int;
-  sC : int;
-  sD : int;
-  sE : int;
-  sF : int;
-}
+let num_waiters_non_zero = Multicore.copy_as_padded (ref false)
+let num_waiters = Multicore.copy_as_padded (ref 0)
 
-let state =
-  {
-    p1 = 0;
-    p2 = 0;
-    p3 = 0;
-    p4 = 0;
-    p5 = 0;
-    p6 = 0;
-    p7 = 0;
-    p8 = 0;
-    p9 = 0;
-    pA = 0;
-    pB = 0;
-    pC = 0;
-    pD = 0;
-    pE = 0;
-    num_waiters_non_zero = false;
-    m1 = 0;
-    m2 = 0;
-    m3 = 0;
-    m4 = 0;
-    m5 = 0;
-    m6 = 0;
-    m7 = 0;
-    m8 = 0;
-    m9 = 0;
-    mA = 0;
-    mB = 0;
-    mC = 0;
-    mD = 0;
-    mE = 0;
-    mF = 0;
-    num_waiters = 0;
-    s1 = 0;
-    s2 = 0;
-    s3 = 0;
-    s4 = 0;
-    s5 = 0;
-    s6 = 0;
-    s7 = 0;
-    s8 = 0;
-    s9 = 0;
-    sA = 0;
-    sB = 0;
-    sC = 0;
-    sD = 0;
-    sE = 0;
-    sF = 0;
-  }
-
-let mutex = Mutex.create ()
-let condition = Condition.create ()
+let num_workers =
+  Sys.argv
+  |> Array.find_map (fun arg ->
+         let prefix = "--num-workers=" in
+         if String.starts_with ~prefix arg then
+           let n = String.length prefix in
+           String.sub arg n (String.length arg - n) |> int_of_string_opt
+         else None)
+  |> Option.map (Int.max 1)
+  |> Option.map (Int.min (Domain.recommended_domain_count ()))
+  |> Option.value ~default:(Domain.recommended_domain_count ())
 
 let workers =
-  let num_workers =
-    Sys.argv
-    |> Array.find_map (fun arg ->
-           let prefix = "--num-workers=" in
-           if String.starts_with ~prefix arg then
-             let n = String.length prefix in
-             String.sub arg n (String.length arg - n) |> int_of_string_opt
-           else None)
-    |> Option.map (Int.max 1)
-    |> Option.map (Int.min (Domain.recommended_domain_count ()))
-    |> Option.value ~default:(Domain.recommended_domain_count ())
-  in
-  Array.init num_workers (fun _ -> null ())
+  Multicore.copy_as_padded (Array.init num_workers (fun _ -> DCYL.make ()))
 
 let rec dispatch res = function
   | Join (k, ws) ->
@@ -184,19 +90,19 @@ let rec loop dcyl =
 
 let next_index i =
   let i = i + 1 in
-  if i < Array.length workers then i else 0
+  if i < num_workers then i else 0
   [@@inline]
 
 let first_index () = next_index (Domain.self () :> int) [@@inline]
 
 let add_waiter () =
-  let n = state.num_waiters + 1 in
-  state.num_waiters <- n;
-  if n = 1 then state.num_waiters_non_zero <- true;
+  let n = !num_waiters + 1 in
+  num_waiters := n;
+  if n = 1 then num_waiters_non_zero := true;
   Condition.wait condition mutex;
-  let n = state.num_waiters - 1 in
-  state.num_waiters <- n;
-  if n = 0 then state.num_waiters_non_zero <- false
+  let n = !num_waiters - 1 in
+  num_waiters := n;
+  if n = 0 then num_waiters_non_zero := false
 
 let rec main wr = try loop wr with DCYL.Empty -> try_steal wr (first_index ())
 
@@ -223,26 +129,26 @@ let () =
 
   let add_worker () =
     let i = (Domain.self () :> int) in
-    if Array.length workers <= i then failwith "add_worker: not sequential";
+    if num_workers <= i then failwith "add_worker: not sequential";
     let wr = DCYL.make () in
     Mutex.lock mutex;
     Array.unsafe_set workers i wr;
     incr num_workers';
-    if !num_workers' = Array.length workers then Condition.broadcast condition;
+    if !num_workers' = num_workers then Condition.broadcast condition;
     Mutex.unlock mutex;
     wr
   in
 
   let wait_ready () =
     Mutex.lock mutex;
-    while !num_workers' <> Array.length workers do
+    while !num_workers' <> num_workers do
       Condition.wait condition mutex
     done;
     Mutex.unlock mutex
   in
 
   add_worker () |> ignore;
-  for _ = 2 to Array.length workers do
+  for _ = 2 to num_workers do
     Domain.spawn (fun () ->
         let wr = add_worker () in
         wait_ready ();
@@ -256,7 +162,7 @@ let worker () = workers.((Domain.self () :> int)) [@@inline]
 
 let push wr work =
   DCYL.push wr work;
-  if state.num_waiters_non_zero then Condition.signal condition
+  if !num_waiters_non_zero then Condition.signal condition
   [@@inline]
 
 (* *)
@@ -271,7 +177,7 @@ let run ef =
   while !res == null () do
     main (Array.unsafe_get workers 0)
   done;
-  !res |> Result.run
+  Result.run !res
 
 (* *)
 
