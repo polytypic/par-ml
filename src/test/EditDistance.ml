@@ -74,7 +74,8 @@ module Parallel = struct
 end
 
 let () =
-  run @@ fun () ->
+  let num_workers = try int_of_string_opt Sys.argv.(1) with _ -> None in
+  run ?num_workers @@ fun () ->
   let use_seq = try Sys.argv.(2) = "seq" with _ -> false in
   let a =
     try Sys.argv.(3)

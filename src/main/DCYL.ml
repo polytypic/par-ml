@@ -10,6 +10,8 @@
 
 [@@@ocaml.warning "-69"] (* Disable unused field warning. *)
 
+open Util
+
 type 'a t = {
   lo : int Atomic.t;
   (* Only the owner mutates the rest: *)
@@ -40,8 +42,6 @@ let mask_of array =
   (* The original unpadded array length must be a power of two. *)
   Multicore.length_of_padded_array_minus_1 array
   [@@inline]
-
-let null _ = Obj.magic () [@@inline]
 
 let make () =
   Multicore.copy_as_padded

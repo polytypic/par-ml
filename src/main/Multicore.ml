@@ -1,3 +1,5 @@
+open Util
+
 let num_padding_words = 15
 
 let copy_as_padded (o : 'a) : 'a =
@@ -7,8 +9,6 @@ let copy_as_padded (o : 'a) : 'a =
     Obj.set_field n i (Obj.field o i)
   done;
   Obj.magic n
-
-let null _ = Obj.magic () [@@inline]
 
 let make_padded_array n x =
   let a = Array.make (n + num_padding_words) (null ()) in

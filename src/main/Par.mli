@@ -1,5 +1,7 @@
-val run : (unit -> 'a) -> 'a
-(** Run parallel / concurrent code. *)
+val run : ?num_workers:int -> (unit -> 'a) -> 'a
+(** Run parallel / concurrent code on given number of domains.  The number will
+    be clamped to the range [(1, Domain.recommended_domain_count ())].  This
+    function may only be called once from the main domain. *)
 
 val par : (unit -> 'a) -> (unit -> 'b) -> 'a * 'b
 (** Perform the two given actions potentially in parallel.  Parallel execution
@@ -13,8 +15,8 @@ module Fiber : sig
   (** Create a new fiber running the given function. *)
 
   val join : 'a t -> 'a
-  (** Wait until the given fiber terminates and either return its final value
-      or raise the exception it terminated with. *)
+  (** Wait until the given fiber terminates and either return its final value or
+      raise the exception it terminated with. *)
 end
 
 module Continuation : sig
