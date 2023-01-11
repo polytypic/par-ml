@@ -1,5 +1,4 @@
 [@@@alert "-unstable"]
-[@@@ocaml.warning "-69"] (* Disable unused field warning. *)
 
 let null _ = Obj.magic () [@@inline]
 let impossible () = failwith "impossible"
@@ -36,8 +35,8 @@ type 'a st =
   | Initial of (unit -> 'a)
   | Join of 'a Continuation.t * 'a st
   | Running
-  | Ok of 'a
-  | Error of exn
+  | Return of 'a
+  | Raise of exn
 
 and worker = work DCYL.t
 and work = W : 'a st Atomic.t -> work
@@ -66,15 +65,15 @@ let rec dispatch res = function
   | Join (k, ws) ->
     begin
       match res with
-      | Ok x -> Continuation.return k x
-      | Error e -> Continuation.raise k e
+      | Return x -> Continuation.return k x
+      | Raise e -> Continuation.raise k e
       | _ -> impossible ()
     end;
     dispatch res ws
   | _ -> res
 
 let run_fiber st th =
-  let res = match th () with x -> Ok x | exception e -> Error e in
+  let res = match th () with x -> Return x | exception e -> Raise e in
   dispatch res (Atomic.exchange st res)
 
 let doit (W st) =
@@ -130,13 +129,11 @@ let () =
   let add_worker () =
     let i = (Domain.self () :> int) in
     if num_workers <= i then failwith "add_worker: not sequential";
-    let wr = DCYL.make () in
     Mutex.lock mutex;
-    Array.unsafe_set workers i wr;
     incr num_workers';
     if !num_workers' = num_workers then Condition.broadcast condition;
     Mutex.unlock mutex;
-    wr
+    Array.unsafe_get workers i
   in
 
   let wait_ready () =
@@ -172,7 +169,7 @@ let run ef =
   let res = ref (null ()) in
   Effect.Deep.try_with
     (fun ef ->
-      match ef () with v -> res := Result.Ok v | exception e -> res := Error e)
+      match ef () with v -> res := Ok v | exception e -> res := Error e)
     ef handler;
   while !res == null () do
     main (Array.unsafe_get workers 0)
@@ -189,30 +186,30 @@ let par tha thb =
   match thb () with
   | y -> begin
     match Atomic.exchange st Running with
-    | Ok x -> (x, y)
-    | Error e -> raise e
+    | Return x -> (x, y)
+    | Raise e -> raise e
     | Initial tha ->
       DCYL.drop_at wr i;
       (tha (), y)
     | _running ->
       ( Continuation.suspend (fun k ->
             match Atomic.exchange st (Join (k, Running)) with
-            | Ok x -> Continuation.return k x
-            | Error e -> Continuation.raise k e
+            | Return x -> Continuation.return k x
+            | Raise e -> Continuation.raise k e
             | _ -> ()),
         y )
   end
   | exception e ->
     let _ =
       match Atomic.exchange st Running with
-      | Ok _ -> null ()
-      | Error e -> raise e
+      | Return _ -> null ()
+      | Raise e -> raise e
       | Initial _ -> DCYL.drop_at wr i |> null
       | _running ->
         Continuation.suspend (fun k ->
             match Atomic.exchange st (Join (k, Running)) with
-            | Ok _ -> Continuation.return k (null ())
-            | Error e -> Continuation.raise k e
+            | Return _ -> Continuation.return k (null ())
+            | Raise e -> Continuation.raise k e
             | _ -> ())
     in
     raise e
@@ -237,20 +234,20 @@ module Fiber = struct
         let wr = worker () in
         if wr == wr' then DCYL.drop_at wr i;
         match run_fiber st th with
-        | Ok x -> x
-        | Error e -> raise e
+        | Return x -> x
+        | Raise e -> raise e
         | _ -> impossible ()
       end
       else join fiber
-    | Ok x -> x
-    | Error e -> raise e
+    | Return x -> x
+    | Raise e -> raise e
     | was ->
       Continuation.suspend @@ fun k ->
       let rec loop was =
         if not (Atomic.compare_and_set st was (Join (k, was))) then
           match Atomic.get st with
-          | Ok x -> Continuation.return k x
-          | Error e -> Continuation.raise k e
+          | Return x -> Continuation.return k x
+          | Raise e -> Continuation.raise k e
           | was -> loop was
       in
       loop was
