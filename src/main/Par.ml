@@ -124,36 +124,14 @@ and wait wr i =
   end
 
 let () =
-  let num_workers' = ref 0 in
-
-  let add_worker () =
-    let i = (Domain.self () :> int) in
-    if num_workers <= i then failwith "add_worker: not sequential";
-    Mutex.lock mutex;
-    incr num_workers';
-    if !num_workers' = num_workers then Condition.broadcast condition;
-    Mutex.unlock mutex;
-    Array.unsafe_get workers i
-  in
-
-  let wait_ready () =
-    Mutex.lock mutex;
-    while !num_workers' <> num_workers do
-      Condition.wait condition mutex
-    done;
-    Mutex.unlock mutex
-  in
-
-  add_worker () |> ignore;
   for _ = 2 to num_workers do
     Domain.spawn (fun () ->
-        let wr = add_worker () in
-        wait_ready ();
+        let i = (Domain.self () :> int) in
+        if num_workers <= i then failwith "add_worker: not sequential";
+        let wr = Array.unsafe_get workers i in
         main wr)
     |> ignore
-  done;
-
-  wait_ready ()
+  done
 
 let worker () = workers.((Domain.self () :> int)) [@@inline]
 
