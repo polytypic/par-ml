@@ -46,19 +46,19 @@ and work = W : 'a st Atomic.t -> work
 let num_waiters_non_zero = Multicore.copy_as_padded (ref false)
 let num_waiters = Multicore.copy_as_padded (ref 0)
 
-let num_workers =
-  Sys.argv
-  |> Array.find_map (fun arg ->
-         let prefix = "--num-workers=" in
-         if String.starts_with ~prefix arg then
-           let n = String.length prefix in
-           String.sub arg n (String.length arg - n) |> int_of_string_opt
-         else None)
-  |> Option.map (Int.max 1)
-  |> Option.map (Int.min (Domain.recommended_domain_count ()))
-  |> Option.value ~default:(Domain.recommended_domain_count ())
-
 let workers =
+  let num_workers =
+    Sys.argv
+    |> Array.find_map (fun arg ->
+           let prefix = "--num-workers=" in
+           if String.starts_with ~prefix arg then
+             let n = String.length prefix in
+             String.sub arg n (String.length arg - n) |> int_of_string_opt
+           else None)
+    |> Option.map (Int.max 1)
+    |> Option.map (Int.min (Domain.recommended_domain_count ()))
+    |> Option.value ~default:(Domain.recommended_domain_count ())
+  in
   Multicore.copy_as_padded (Array.init num_workers (fun _ -> DCYL.make ()))
 
 let rec dispatch res = function
@@ -89,7 +89,7 @@ let rec loop dcyl =
 
 let next_index i =
   let i = i + 1 in
-  if i < num_workers then i else 0
+  if i < Multicore.length_of_padded_array workers then i else 0
   [@@inline]
 
 let first_index () = next_index (Domain.self () :> int) [@@inline]
@@ -124,10 +124,11 @@ and wait wr i =
   end
 
 let () =
-  for _ = 2 to num_workers do
+  for _ = 2 to Multicore.length_of_padded_array workers do
     Domain.spawn (fun () ->
         let i = (Domain.self () :> int) in
-        if num_workers <= i then failwith "add_worker: not sequential";
+        if Multicore.length_of_padded_array workers <= i then
+          failwith "add_worker: not sequential";
         let wr = Array.unsafe_get workers i in
         main wr)
     |> ignore

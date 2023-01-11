@@ -37,8 +37,8 @@ type pos = int
 exception Empty
 
 let mask_of array =
-  (* The array length must be a power of two. *)
-  Array.length array - 1
+  (* The original unpadded array length must be a power of two. *)
+  Multicore.length_of_padded_array_minus_1 array
   [@@inline]
 
 let null _ = Obj.magic () [@@inline]
@@ -47,7 +47,7 @@ let make () =
   Multicore.copy_as_padded
     {
       lo = Multicore.copy_as_padded (Atomic.make 0);
-      elems = Array.make 64 (null ());
+      elems = Multicore.make_padded_array 16 (null ());
       m2 = 0;
       m3 = 0;
       m4 = 0;
@@ -81,10 +81,11 @@ let grow dcyl =
   let elems = dcyl.elems in
   let mask = mask_of elems in
   let mask' = (mask * 2) + 1 in
-  let elems' = Array.make (mask' + 1) (null ()) in
+  let elems' = Multicore.make_padded_array (mask' + 1) (null ()) in
   let lo = Atomic.get dcyl.lo in
   for i = lo to dcyl.hi - 1 do
-    elems'.(i land mask') <- elems.(i land mask)
+    Array.unsafe_set elems' (i land mask')
+      (Array.unsafe_get elems (i land mask))
   done;
   dcyl.elems <- elems'
 
