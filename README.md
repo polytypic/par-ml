@@ -1,61 +1,52 @@
 # Experimental parallel and concurrent OCaml
 
-Compared to [lockfree](https://github.com/ocaml-multicore/lockfree)
-work-stealing deque:
+_*NOTE*_: There are multiple different approaches implemented in this
+repository. See the different
+[branches](https://github.com/polytypic/par-ml/branches/all).
 
-- Padding is added (see
-  [here](https://github.com/polytypic/par-ml/blob/main/src/main/Atomic.ml#L5-L21)
-  and
-  [here](https://github.com/polytypic/par-ml/blob/main/src/main/DCYL.ml#L13-L48))
-  to avoid false-sharing.
-- Only
-  [a single atomic variable](https://github.com/polytypic/par-ml/blob/f4dd2bbfdb5384bfbf95e9e4117d880c95308a47/src/main/DCYL.ml#L14)
-  is used (closer to
+This particular approach uses the DCYL work-stealing deque. This gives
+reasonable overhead and good parallelization of the last few work items.
+
+Key differences compared to
+[lockfree](https://github.com/ocaml-multicore/lockfree) work-stealing deque and
+the version implemented [here](src/main/DCYL.ml):
+
+- Padding is added, see [`Multicore.mli`](src/main/Multicore.mli), to long-lived
+  objects to avoid false-sharing.
+- Only a single atomic variable is used (closer to
   [original paper](https://www.semanticscholar.org/paper/Dynamic-circular-work-stealing-deque-Chase-Lev/f856a996e7aec0ea6db55e9247a00a01cb695090)).
-- A level of (pointer) indirection is avoided by using
-  [a different technique to release stolen elements](https://github.com/polytypic/par-ml/blob/f4dd2bbfdb5384bfbf95e9e4117d880c95308a47/src/main/DCYL.ml#L98-L107).
-- [`mark` and `drop_at` operations](https://github.com/polytypic/par-ml/blob/f4dd2bbfdb5384bfbf95e9e4117d880c95308a47/src/main/DCYL.mli#L20-L25)
-  are provided to allow owner to remove elements from deque without dropping to
-  main loop (see
-  [here](https://github.com/polytypic/par-ml/blob/f4dd2bbfdb5384bfbf95e9e4117d880c95308a47/src/main/Par.ml#L280)
-  and
-  [here](https://github.com/polytypic/par-ml/blob/f4dd2bbfdb5384bfbf95e9e4117d880c95308a47/src/main/Par.ml#L289),
-  for example).
+- A level of (pointer) indirection is avoided by using a different technique to
+  release stolen elements (look for `clear_stolen`).
+- [`mark` and `drop_at` operations](src/main/DCYL.mli) are provided to allow
+  owner to remove elements from deque without dropping to main loop.
 
-Compared to [domainslib](https://github.com/ocaml-multicore/domainslib):
+Key differences compared to the worker pool of
+[domainslib](https://github.com/ocaml-multicore/domainslib) and the approach
+implemented [here](src/main/Par.ml):
 
-- A more general
-  [`Suspend` effect](https://github.com/polytypic/par-ml/blob/d64a7f5941409b3ce56a91912075ac27fdc5341f/src/main/Par.ml#L9)
-  is used to allow synchronization primitives to be built on top of the
-  scheduler.
+- A more general `Suspend` effect is used to allow synchronization primitives to
+  be built on top of the scheduler.
 - The pool of workers is not exposed. The idea is that there is only one system
   level pool of workers to be used by all parallel and concurrent code.
-  [`Domain.self ()` is used as index](https://github.com/polytypic/par-ml/blob/d64a7f5941409b3ce56a91912075ac27fdc5341f/src/main/Par.ml#L90)
-  and are assumed to be consecutive numbers in the range `[0, n[`.
-- A lower overhead
-  [`par` operation](https://github.com/polytypic/par-ml/blob/d64a7f5941409b3ce56a91912075ac27fdc5341f/src/main/Par.mli#L4-L6)
-  is provided for parallel execution.
-- Work items are
-  [defunctionalized](https://github.com/polytypic/par-ml/blob/f4dd2bbfdb5384bfbf95e9e4117d880c95308a47/src/main/Par.ml#L30-L38)
-  replacing a closure with an existential inside an atomic.
-- A simple
-  [parking](https://github.com/polytypic/par-ml/blob/f4dd2bbfdb5384bfbf95e9e4117d880c95308a47/src/main/Par.ml#L196)/[wake-up](https://github.com/polytypic/par-ml/blob/f4dd2bbfdb5384bfbf95e9e4117d880c95308a47/src/main/Par.ml#L259)
-  mechanism using a `Mutex` and a `Condition` variable and a shared
-  [non-atomic flag](https://github.com/polytypic/par-ml/blob/f4dd2bbfdb5384bfbf95e9e4117d880c95308a47/src/main/Par.ml#L57)
-  is used.
+  - `Domain.self ()` is used as index for efficient per domain storage. The
+    domain ids are assumed to be consecutive numbers in the range `[0, n[`.
+- A lower overhead [`par`](src/main/Par.mli) operation is provided for parallel
+  execution.
+- Work items are defunctionalized replacing a closure with an existential inside
+  an atomic.
+- A simple parking/wake-up mechanism using a `Mutex`, a `Condition` variable,
+  and a shared non-atomic flag (look for `num_waiters_non_zero`) is used.
 
 It would seem that the ability to drop work items from the owned deque, and
 thereby avoid accumulation of stale work items, and, at the same time, ability
 to avoid capturing continuations, can provide major performance benefits
 (roughly 5x) in cases where it applies. Other optimizations provide a small
-benefit (roughly 2x).
+benefits (roughly 2x).
+
+Avoiding false-sharing is crucial for stable performance.
 
 TODO:
 
-- Is the
-  [work-stealing deque](https://github.com/polytypic/par-ml/blob/d64a7f5941409b3ce56a91912075ac27fdc5341f/src/main/DCYL.ml)
-  implementation correct?
-- More scalable parking/wake-up mechanism?
 - Support for cancellation.
 - `sleep` mechanism.
 - Composable synchronization primitives (e.g. ability to `race` fibers).
