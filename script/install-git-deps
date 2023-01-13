@@ -1,0 +1,7 @@
+#!/bin/bash
+
+. "${BASH_SOURCE%/*}/common"
+
+for GIT_DEP in $GIT_DEPS; do
+  opam pin -y "$GIT_DEP"
+done

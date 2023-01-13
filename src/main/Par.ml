@@ -3,8 +3,6 @@
 open Util
 
 let mutex = Mutex.create ()
-let condition = Condition.create ()
-let result_ready = Multicore.copy_as_padded (ref false)
 
 type 'a continuation = ('a, unit) Effect.Deep.continuation
 type _ Effect.t += Suspend : ('a continuation -> unit) -> 'a Effect.t
@@ -14,7 +12,7 @@ let effc (type a) : a Effect.t -> _ = function
   | _ -> None
 
 let handler =
-  Multicore.copy_as_padded {Effect.Deep.retc = ignore; exnc = raise; effc}
+  Multicore_magic.copy_as_padded {Effect.Deep.retc = ignore; exnc = raise; effc}
 
 type 'a fiber_state =
   | Initial of (unit -> 'a)
@@ -25,11 +23,42 @@ type 'a fiber_state =
 
 type work = Work : 'a fiber_state Atomic.t -> work
 
-let num_waiters_non_zero = Multicore.copy_as_padded (ref false)
-let num_waiters = Multicore.copy_as_padded (ref 0)
-
 let workers =
-  Multicore.make_padded_array (Domain.recommended_domain_count ()) (null ())
+  Multicore_magic.copy_as_padded
+    (ref
+       (Multicore_magic.make_padded_array
+          (Domain.recommended_domain_count ())
+          (null ())))
+
+let worker_at i = Array.unsafe_get !workers i [@@inline]
+let worker () = worker_at (Domain.self () :> int) [@@inline]
+
+let set ar i x =
+  let n = Multicore_magic.length_of_padded_array !ar in
+  if n <= i then begin
+    let a =
+      Multicore_magic.make_padded_array (Int.max (n * 2) (i + 1)) (null ())
+    in
+    for i = 0 to n - 1 do
+      Array.unsafe_set a i (Array.unsafe_get !ar i)
+    done;
+    ar := a
+  end;
+  Array.unsafe_set !ar i x
+
+let prepare () =
+  Mutex.lock mutex;
+  Idle_domains.all ()
+  |> List.iter (fun (id : Idle_domains.managed_id) ->
+         set workers (id :> int) (DCYL.make ()));
+  Mutex.unlock mutex
+
+let prepare (id : Idle_domains.managed_id) =
+  if
+    Multicore_magic.length_of_padded_array !workers <= (id :> int)
+    || null () == worker_at (id :> int)
+  then prepare ()
+  [@@inline]
 
 let rec dispatch res = function
   | Join (k, ws) ->
@@ -44,10 +73,10 @@ let rec dispatch res = function
 
 let run_fiber st th =
   let res = match th () with x -> Return x | exception e -> Raise e in
-  dispatch res (Atomic.exchange st res)
+  dispatch res @@ Atomic.exchange st res
 
 let run_work (Work st) =
-  match Atomic.get st with
+  match Multicore_magic.fenceless_get st with
   | Initial th as was ->
     if Atomic.compare_and_set st was Running then run_fiber st th |> ignore
   | _ -> ()
@@ -58,74 +87,46 @@ let rec loop dcyl =
   loop dcyl
 
 let rec main wr =
-  try loop wr with DCYL.Empty -> try_steal wr ((Domain.self () :> int) + 1)
+  try loop wr
+  with DCYL.Empty ->
+    DCYL.reset wr;
+    try_steal wr @@ Idle_domains.next @@ Idle_domains.self ()
 
-and try_steal wr i =
-  let victim = Array.unsafe_get workers i in
-  if victim == null () then try_steal wr 0
-  else if victim == wr then wait wr i
-  else
+and try_steal wr id =
+  let victim = worker_at (id :> int) in
+  if victim != wr then
     match DCYL.steal victim with
     | work ->
+      if DCYL.seems_non_empty victim then
+        Idle_domains.try_spawn ~scheduler |> ignore;
       Effect.Deep.match_with run_work work handler;
       main wr
-    | exception DCYL.Empty -> try_steal wr (i + 1)
+    | exception DCYL.Empty -> try_steal wr @@ Idle_domains.next id
 
-and wait wr i =
-  if not !result_ready then begin
-    Mutex.lock mutex;
-    let n = !num_waiters + 1 in
-    num_waiters := n;
-    if n = 1 then num_waiters_non_zero := true;
-    if not !result_ready then Condition.wait condition mutex;
-    let n = !num_waiters - 1 in
-    num_waiters := n;
-    if n = 0 then num_waiters_non_zero := false;
-    Mutex.unlock mutex;
-    try_steal wr (i + 1)
-  end
-
-let worker () = workers.((Domain.self () :> int)) [@@inline]
+and scheduler mid =
+  let wr = worker_at (mid :> int) in
+  try_steal wr @@ Idle_domains.next mid
 
 let push wr work =
   DCYL.push wr work;
-  if !num_waiters_non_zero then Condition.signal condition
+  Idle_domains.try_spawn ~scheduler |> ignore
   [@@inline]
 
 (* *)
 
-let run ?num_workers ef =
-  if 0 <> (Domain.self () :> int) then failwith "only main domain may call run";
-  if !result_ready then failwith "run can only be called once";
-  let max_workers = Multicore.length_of_padded_array workers in
-  let num_workers =
-    num_workers
-    |> Option.map (Int.max 1)
-    |> Option.map (Int.min max_workers)
-    |> Option.value ~default:max_workers
-  in
-  for i = 0 to num_workers - 1 do
-    Array.unsafe_set workers i (DCYL.make ())
-  done;
-  let domains =
-    Array.init (num_workers - 1) @@ fun _ ->
-    Domain.spawn @@ fun () ->
-    let i = (Domain.self () :> int) in
-    if num_workers <= i then failwith "add_worker: not sequential";
-    let wr = Array.unsafe_get workers i in
-    main wr
-  in
+let not_null result = !result != null ()
+
+let run ef =
+  let mid = Idle_domains.self () in
+  prepare mid;
   let result = ref (null ()) in
   Effect.Deep.match_with
     (fun ef ->
       (result := match ef () with v -> Ok v | exception e -> Error e);
-      Mutex.lock mutex;
-      result_ready := true;
-      Condition.broadcast condition;
-      Mutex.unlock mutex)
+      Idle_domains.wakeup mid)
     ef handler;
-  main (Array.unsafe_get workers 0);
-  Array.iter Domain.join domains;
+  main @@ worker_at (mid :> int);
+  Idle_domains.idle ~until:not_null result;
   Result.run !result
 
 module Continuation = struct
@@ -184,7 +185,7 @@ module Fiber = struct
     fiber
 
   let rec join ((wr', i, st) as fiber) =
-    match Atomic.get st with
+    match Multicore_magic.fenceless_get st with
     | Initial th as t ->
       if Atomic.compare_and_set st t Running then begin
         let wr = worker () in
@@ -201,7 +202,7 @@ module Fiber = struct
       Continuation.suspend @@ fun k ->
       let rec loop was =
         if not (Atomic.compare_and_set st was (Join (k, was))) then
-          match Atomic.get st with
+          match Multicore_magic.fenceless_get st with
           | Return x -> Continuation.return k x
           | Raise e -> Continuation.raise k e
           | was -> loop was

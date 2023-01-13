@@ -30,6 +30,9 @@ jobs:
         with:
           ocaml-compiler: ${{ matrix.ocaml-compiler }}
 
+      - name: Install Git dependencies
+        run: ./script/install-git-deps
+
       - name: Install dependencies
         run: opam pin . --with-doc --with-test --yes
 

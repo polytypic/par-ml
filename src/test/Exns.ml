@@ -17,6 +17,8 @@ let test_spawn () =
   | exception Expected 21 -> ()
 
 let () =
+  Idle_domains.prepare ~num_domains:2;
+
   run @@ fun () ->
   let _ = test_par () in
   let _ = test_spawn () in

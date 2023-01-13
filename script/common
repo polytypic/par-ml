@@ -3,6 +3,7 @@
 set -eo pipefail
 
 export PROJECT=par-ml
+export GIT_DEPS="https://github.com/polytypic/idle-domains.git"
 export DOCS=_build/default/_doc/_html/
 export GIT=git@github.com:polytypic/$PROJECT.git
 

@@ -40,14 +40,14 @@ exception Empty
 
 let mask_of array =
   (* The original unpadded array length must be a power of two. *)
-  Multicore.length_of_padded_array_minus_1 array
+  Multicore_magic.length_of_padded_array_minus_1 array
   [@@inline]
 
 let make () =
-  Multicore.copy_as_padded
+  Multicore_magic.copy_as_padded
     {
-      lo = Multicore.copy_as_padded (Atomic.make 0);
-      elems = Multicore.make_padded_array 16 (null ());
+      lo = Multicore_magic.copy_as_padded (Atomic.make 0);
+      elems = Multicore_magic.make_padded_array 4 (null ());
       m2 = 0;
       m3 = 0;
       m4 = 0;
@@ -81,7 +81,7 @@ let grow dcyl =
   let elems = dcyl.elems in
   let mask = mask_of elems in
   let mask' = (mask * 2) + 1 in
-  let elems' = Multicore.make_padded_array (mask' + 1) (null ()) in
+  let elems' = Multicore_magic.make_padded_array (mask' + 1) (null ()) in
   let lo = Atomic.get dcyl.lo in
   for i = lo to dcyl.hi - 1 do
     Array.unsafe_set elems' (i land mask')
@@ -99,7 +99,7 @@ let push dcyl elem =
   if hi - lo < mask then begin
     Array.unsafe_set elems (hi land mask) elem;
     (* Ensure `elem` is written before `hi` so thieves read valid elems. *)
-    Atomic.fence dcyl.lo;
+    Multicore_magic.fence dcyl.lo;
     (* Thieves may read old value of `hi`, but that should be safe. *)
     dcyl.hi <- hi + 1
   end
@@ -111,7 +111,7 @@ let push dcyl elem =
     let mask = mask_of elems in
     Array.unsafe_set elems (hi land mask) elem;
     (* Ensure `elem` is written before `hi` so thieves read valid elems. *)
-    Atomic.fence dcyl.lo;
+    Multicore_magic.fence dcyl.lo;
     (* Thieves may read old value of `hi`, but that should be safe. *)
     dcyl.hi <- hi + 1
   end
@@ -173,3 +173,8 @@ let rec steal dcyl =
       (* Unsafe to write `null ()` over elem here, see `clear_stolen`. *)
       elem
     else steal dcyl
+
+let seems_non_empty dcyl = Multicore_magic.fenceless_get dcyl.lo < dcyl.hi
+  [@@inline]
+
+let reset dcyl = dcyl.elems <- Multicore_magic.make_padded_array 4 (null ())

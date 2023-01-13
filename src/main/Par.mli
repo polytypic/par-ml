@@ -1,7 +1,6 @@
-val run : ?num_workers:int -> (unit -> 'a) -> 'a
-(** Run parallel / concurrent code on given number of domains.  The number will
-    be clamped to the range [(1, Domain.recommended_domain_count ())].  This
-    function may only be called once from the main domain. *)
+val run : (unit -> 'a) -> 'a
+(** Run parallel / concurrent code potentially on all idle domains of the
+    current managed domain group. *)
 
 val par : (unit -> 'a) -> (unit -> 'b) -> 'a * 'b
 (** Perform the two given actions potentially in parallel.  Parallel execution

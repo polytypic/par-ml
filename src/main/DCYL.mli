@@ -17,6 +17,9 @@ val pop : 'a t -> 'a
 (** Attempt to pop element of deque.  Raises [Empty] if deque is empty.  Only
     the owner may call this. *)
 
+val seems_non_empty : 'a t -> bool
+(** Perform a quick check to test if the deque appears to be empty. *)
+
 val mark : 'a t -> pos
 (** Get position of next [push]. *)
 
@@ -27,3 +30,7 @@ val drop_at : 'a t -> pos -> unit
 val steal : 'a t -> 'a
 (** Attempt to remove an element from the deque.  Raises [Empty] if deque is
     empty. *)
+
+val reset : 'a t -> unit
+(** Reset the capacity of the deque to initial state.  Only the owner may call
+    this when the deque is empty. *)

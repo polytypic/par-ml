@@ -4,15 +4,17 @@ _*NOTE*_: There are multiple different approaches implemented in this
 repository. See the different
 [branches](https://github.com/polytypic/par-ml/branches/all).
 
-This particular approach uses the DCYL work-stealing deque. This gives
+This particular approach uses the DCYL work-stealing deque on top of the
+[`idle-domains`](https://github.com/polytypic/idle-domains) library. This gives
 reasonable overhead and good parallelization of the last few work items.
 
 Key differences compared to
 [lockfree](https://github.com/ocaml-multicore/lockfree) work-stealing deque and
 the version implemented [here](src/main/DCYL.ml):
 
-- Padding is added, see [`Multicore.mli`](src/main/Multicore.mli), to long-lived
-  objects to avoid false-sharing.
+- Padding is added, see the
+  [`multicore-magic`](https://github.com/polytypic/multicore-magic) library, to
+  long-lived objects to avoid false-sharing.
 - Only a single atomic variable is used (closer to
   [original paper](https://www.semanticscholar.org/paper/Dynamic-circular-work-stealing-deque-Chase-Lev/f856a996e7aec0ea6db55e9247a00a01cb695090)).
 - A level of (pointer) indirection is avoided by using a different technique to
@@ -27,15 +29,17 @@ implemented [here](src/main/Par.ml):
 - A more general `Suspend` effect is used to allow synchronization primitives to
   be built on top of the scheduler.
 - The pool of workers is not exposed. The idea is that there is only one system
-  level pool of workers to be used by all parallel and concurrent code.
+  level pool of workers, provided by
+  [`idle-domains`](https://github.com/polytypic/idle-domains) to be used by all
+  parallel and concurrent code.
   - `Domain.self ()` is used as index for efficient per domain storage. The
     domain ids are assumed to be consecutive numbers in the range `[0, n[`.
 - A lower overhead [`par`](src/main/Par.mli) operation is provided for parallel
   execution.
 - Work items are defunctionalized replacing a closure with an existential inside
   an atomic.
-- A simple parking/wake-up mechanism using a `Mutex`, a `Condition` variable,
-  and a shared non-atomic flag (look for `num_waiters_non_zero`) is used.
+- The [`idle-domains`](https://github.com/polytypic/idle-domains) library is
+  used for parking and waking up workers based on operations it provides.
 
 It would seem that the ability to drop work items from the owned deque, and
 thereby avoid accumulation of stale work items, and, at the same time, ability
@@ -62,53 +66,53 @@ These have been run on Apple M1 with 4 + 4 cores (in normal mode).
 > roughly 6.5.
 
 ```sh
-➜  P=FibFiber.exe; N=37; hyperfine --warmup 1 --shell none "$P --num-workers=1 $N" "$P --num-workers=2 $N" "$P --num-workers=4 $N" "$P --num-workers=8 $N"
-Benchmark 1: FibFiber.exe --num-workers=1 37
-  Time (mean ± σ):      1.212 s ±  0.009 s    [User: 1.208 s, System: 0.004 s]
-  Range (min … max):    1.196 s …  1.220 s    10 runs
+➜  P=FibFiber.exe; N=37; hyperfine --warmup 1 --shell none "$P 1 $N" "$P 2 $N" "$P 4 $N" "$P 8 $N"
+Benchmark 1: FibFiber.exe 1 37
+  Time (mean ± σ):      1.205 s ±  0.001 s    [User: 1.201 s, System: 0.004 s]
+  Range (min … max):    1.204 s …  1.208 s    10 runs
 
-Benchmark 2: FibFiber.exe --num-workers=2 37
-  Time (mean ± σ):     666.5 ms ±   0.5 ms    [User: 1319.5 ms, System: 3.9 ms]
-  Range (min … max):   665.9 ms … 667.2 ms    10 runs
+Benchmark 2: FibFiber.exe 2 37
+  Time (mean ± σ):     659.0 ms ±   0.5 ms    [User: 1304.7 ms, System: 3.9 ms]
+  Range (min … max):   658.4 ms … 659.9 ms    10 runs
 
-Benchmark 3: FibFiber.exe --num-workers=4 37
-  Time (mean ± σ):     357.2 ms ±   1.2 ms    [User: 1388.2 ms, System: 7.3 ms]
-  Range (min … max):   355.6 ms … 359.0 ms    10 runs
+Benchmark 3: FibFiber.exe 4 37
+  Time (mean ± σ):     354.2 ms ±   1.6 ms    [User: 1376.1 ms, System: 7.9 ms]
+  Range (min … max):   352.4 ms … 357.3 ms    10 runs
 
-Benchmark 4: FibFiber.exe --num-workers=8 37
-  Time (mean ± σ):     480.8 ms ±  23.6 ms    [User: 3146.9 ms, System: 81.0 ms]
-  Range (min … max):   432.5 ms … 511.3 ms    10 runs
+Benchmark 4: FibFiber.exe 8 37
+  Time (mean ± σ):     426.4 ms ±  13.4 ms    [User: 2794.3 ms, System: 84.9 ms]
+  Range (min … max):   406.2 ms … 448.6 ms    10 runs
 
 Summary
-  'FibFiber.exe --num-workers=4 37' ran
-    1.35 ± 0.07 times faster than 'FibFiber.exe --num-workers=8 37'
-    1.87 ± 0.01 times faster than 'FibFiber.exe --num-workers=2 37'
-    3.39 ± 0.03 times faster than 'FibFiber.exe --num-workers=1 37'
+  'FibFiber.exe 4 37' ran
+    1.20 ± 0.04 times faster than 'FibFiber.exe 8 37'
+    1.86 ± 0.01 times faster than 'FibFiber.exe 2 37'
+    3.40 ± 0.02 times faster than 'FibFiber.exe 1 37'
 ```
 
 ```sh
-➜  P=FibPar.exe; N=37; hyperfine --warmup 1 --shell none "$P --num-workers=1 $N" "$P --num-workers=2 $N" "$P --num-workers=4 $N" "$P --num-workers=8 $N"
-Benchmark 1: FibPar.exe --num-workers=1 37
-  Time (mean ± σ):     895.2 ms ±   1.4 ms    [User: 891.7 ms, System: 2.9 ms]
-  Range (min … max):   893.6 ms … 897.2 ms    10 runs
+➜  P=FibPar.exe; N=37; hyperfine --warmup 1 --shell none "$P 1 $N" "$P 2 $N" "$P 4 $N" "$P 8 $N"
+Benchmark 1: FibPar.exe 1 37
+  Time (mean ± σ):     898.0 ms ±   0.4 ms    [User: 894.8 ms, System: 2.7 ms]
+  Range (min … max):   897.4 ms … 898.7 ms    10 runs
 
-Benchmark 2: FibPar.exe --num-workers=2 37
-  Time (mean ± σ):     551.4 ms ±   2.1 ms    [User: 1090.0 ms, System: 3.5 ms]
-  Range (min … max):   549.3 ms … 555.6 ms    10 runs
+Benchmark 2: FibPar.exe 2 37
+  Time (mean ± σ):     547.9 ms ±   1.0 ms    [User: 1083.2 ms, System: 3.5 ms]
+  Range (min … max):   547.1 ms … 550.6 ms    10 runs
 
-Benchmark 3: FibPar.exe --num-workers=4 37
-  Time (mean ± σ):     296.2 ms ±   1.1 ms    [User: 1145.6 ms, System: 7.4 ms]
-  Range (min … max):   294.6 ms … 298.3 ms    10 runs
+Benchmark 3: FibPar.exe 4 37
+  Time (mean ± σ):     295.1 ms ±   1.0 ms    [User: 1142.4 ms, System: 7.2 ms]
+  Range (min … max):   293.7 ms … 296.9 ms    10 runs
 
-Benchmark 4: FibPar.exe --num-workers=8 37
-  Time (mean ± σ):     443.9 ms ±  18.4 ms    [User: 2846.7 ms, System: 89.2 ms]
-  Range (min … max):   419.7 ms … 483.3 ms    10 runs
+Benchmark 4: FibPar.exe 8 37
+  Time (mean ± σ):     431.7 ms ±  35.6 ms    [User: 2776.3 ms, System: 88.4 ms]
+  Range (min … max):   393.6 ms … 517.7 ms    10 runs
 
 Summary
-  'FibPar.exe --num-workers=4 37' ran
-    1.50 ± 0.06 times faster than 'FibPar.exe --num-workers=8 37'
-    1.86 ± 0.01 times faster than 'FibPar.exe --num-workers=2 37'
-    3.02 ± 0.01 times faster than 'FibPar.exe --num-workers=1 37'
+  'FibPar.exe 4 37' ran
+    1.46 ± 0.12 times faster than 'FibPar.exe 8 37'
+    1.86 ± 0.01 times faster than 'FibPar.exe 2 37'
+    3.04 ± 0.01 times faster than 'FibPar.exe 1 37'
 ```
 
 In the following, the `fib_par` example of domainslib

@@ -74,8 +74,10 @@ module Parallel = struct
 end
 
 let () =
-  let num_workers = try int_of_string_opt Sys.argv.(1) with _ -> None in
-  run ?num_workers @@ fun () ->
+  let num_domains = try int_of_string_opt Sys.argv.(1) with _ -> None in
+  Idle_domains.prepare_opt ~num_domains;
+
+  run @@ fun () ->
   let use_seq = try Sys.argv.(2) = "seq" with _ -> false in
   let a =
     try Sys.argv.(3)
@@ -92,8 +94,8 @@ let () =
   (* We don't use atomic instructions to read and write to the memo table. The
      memory model ensures that there are no out-of-thin-air values. Hence, the
      value in a cell will either be the initial value [-1] or the computed
-     result. Multiple tasks may compute the result for the same cell. But all of
-     them compute the same result. *)
+     result. Multiple tasks may compute the result for the same cell. But all
+     of them compute the same result. *)
   let get a b = table.(length a).(length b) in
   let set a b res = table.(length a).(length b) <- res in
   let seq_ed = Memo.memo_rec ~get ~set Sequential.edit_distance in
