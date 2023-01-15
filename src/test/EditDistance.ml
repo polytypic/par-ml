@@ -74,6 +74,9 @@ module Parallel = struct
 end
 
 let () =
+  let num_domains = try int_of_string_opt Sys.argv.(1) with _ -> None in
+  Idle_domains.prepare_opt ~num_domains;
+
   run @@ fun () ->
   let use_seq = try Sys.argv.(2) = "seq" with _ -> false in
   let a =
