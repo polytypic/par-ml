@@ -11,8 +11,9 @@ Key differences compared to
 [lockfree](https://github.com/ocaml-multicore/lockfree) work-stealing deque and
 the version implemented [here](src/main/DCYL.ml):
 
-- Padding is added, see [`Multicore.mli`](src/main/Multicore.mli), to long-lived
-  objects to avoid false-sharing.
+- Padding is added, see the
+  [`multicore-magic`](https://github.com/polytypic/multicore-magic) library, to
+  long-lived objects to avoid false-sharing.
 - Only a single atomic variable is used (closer to
   [original paper](https://www.semanticscholar.org/paper/Dynamic-circular-work-stealing-deque-Chase-Lev/f856a996e7aec0ea6db55e9247a00a01cb695090)).
 - A level of (pointer) indirection is avoided by using a different technique to

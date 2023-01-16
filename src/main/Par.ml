@@ -17,7 +17,7 @@ let effc (type a) : a Effect.t -> _ = function
   | Suspend ef -> Some ef
   | _ -> None
 
-let handler = Multicore.copy_as_padded {Effect.Deep.effc}
+let handler = Multicore_magic.copy_as_padded {Effect.Deep.effc}
 
 (* *)
 
@@ -43,8 +43,8 @@ and work = W : 'a st Atomic.t -> work
 
 (* *)
 
-let num_waiters_non_zero = Multicore.copy_as_padded (ref false)
-let num_waiters = Multicore.copy_as_padded (ref 0)
+let num_waiters_non_zero = Multicore_magic.copy_as_padded (ref false)
+let num_waiters = Multicore_magic.copy_as_padded (ref 0)
 
 let workers =
   let num_workers =
@@ -53,7 +53,8 @@ let workers =
     |> Option.map (Int.min (Domain.recommended_domain_count ()))
     |> Option.value ~default:(Domain.recommended_domain_count ())
   in
-  Multicore.copy_as_padded (Array.init num_workers (fun _ -> DCYL.make ()))
+  Multicore_magic.copy_as_padded
+    (Array.init num_workers (fun _ -> DCYL.make ()))
 
 let rec dispatch res = function
   | Join (k, ws) ->
@@ -83,7 +84,7 @@ let rec loop dcyl =
 
 let next_index i =
   let i = i + 1 in
-  if i < Multicore.length_of_padded_array workers then i else 0
+  if i < Multicore_magic.length_of_padded_array workers then i else 0
   [@@inline]
 
 let first_index () = next_index (Domain.self () :> int) [@@inline]
@@ -118,10 +119,10 @@ and wait wr i =
   end
 
 let () =
-  for _ = 2 to Multicore.length_of_padded_array workers do
+  for _ = 2 to Multicore_magic.length_of_padded_array workers do
     Domain.spawn (fun () ->
         let i = (Domain.self () :> int) in
-        if Multicore.length_of_padded_array workers <= i then
+        if Multicore_magic.length_of_padded_array workers <= i then
           failwith "add_worker: not sequential";
         let wr = Array.unsafe_get workers i in
         main wr)

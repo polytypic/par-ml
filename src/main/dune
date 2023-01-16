@@ -1,3 +1,4 @@
 (library
  (name Par)
- (public_name par))
+ (public_name par)
+ (libraries multicore-magic))
