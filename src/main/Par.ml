@@ -72,7 +72,7 @@ let run_fiber st th =
   dispatch res (Atomic.exchange st res)
 
 let doit (W st) =
-  match Atomic.get st with
+  match Multicore_magic.fenceless_get st with
   | Initial th as was ->
     if Atomic.compare_and_set st was Running then run_fiber st th |> ignore
   | _ -> ()
@@ -202,7 +202,7 @@ module Fiber = struct
     fiber
 
   let rec join ((wr', i, st) as fiber) =
-    match Atomic.get st with
+    match Multicore_magic.fenceless_get st with
     | Initial th as t ->
       if Atomic.compare_and_set st t Running then begin
         let wr = worker () in
@@ -219,7 +219,7 @@ module Fiber = struct
       Continuation.suspend @@ fun k ->
       let rec loop was =
         if not (Atomic.compare_and_set st was (Join (k, was))) then
-          match Atomic.get st with
+          match Multicore_magic.fenceless_get st with
           | Return x -> Continuation.return k x
           | Raise e -> Continuation.raise k e
           | was -> loop was
