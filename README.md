@@ -62,53 +62,53 @@ These have been run on Apple M1 with 4 + 4 cores (in normal mode).
 > roughly 6.5.
 
 ```sh
-➜  P=FibFiber.exe; N=37; hyperfine --warmup 1 --shell none "$P --num-workers=1 $N" "$P --num-workers=2 $N" "$P --num-workers=4 $N" "$P --num-workers=8 $N"
-Benchmark 1: FibFiber.exe --num-workers=1 37
+➜  P=FibFiber.exe; N=37; hyperfine --warmup 1 --shell none "$P 1 $N" "$P 2 $N" "$P 4 $N" "$P 8 $N"
+Benchmark 1: FibFiber.exe 1 37
   Time (mean ± σ):      1.212 s ±  0.009 s    [User: 1.208 s, System: 0.004 s]
   Range (min … max):    1.196 s …  1.220 s    10 runs
 
-Benchmark 2: FibFiber.exe --num-workers=2 37
+Benchmark 2: FibFiber.exe 2 37
   Time (mean ± σ):     666.5 ms ±   0.5 ms    [User: 1319.5 ms, System: 3.9 ms]
   Range (min … max):   665.9 ms … 667.2 ms    10 runs
 
-Benchmark 3: FibFiber.exe --num-workers=4 37
+Benchmark 3: FibFiber.exe 4 37
   Time (mean ± σ):     357.2 ms ±   1.2 ms    [User: 1388.2 ms, System: 7.3 ms]
   Range (min … max):   355.6 ms … 359.0 ms    10 runs
 
-Benchmark 4: FibFiber.exe --num-workers=8 37
+Benchmark 4: FibFiber.exe 8 37
   Time (mean ± σ):     480.8 ms ±  23.6 ms    [User: 3146.9 ms, System: 81.0 ms]
   Range (min … max):   432.5 ms … 511.3 ms    10 runs
 
 Summary
-  'FibFiber.exe --num-workers=4 37' ran
-    1.35 ± 0.07 times faster than 'FibFiber.exe --num-workers=8 37'
-    1.87 ± 0.01 times faster than 'FibFiber.exe --num-workers=2 37'
-    3.39 ± 0.03 times faster than 'FibFiber.exe --num-workers=1 37'
+  'FibFiber.exe 4 37' ran
+    1.35 ± 0.07 times faster than 'FibFiber.exe 8 37'
+    1.87 ± 0.01 times faster than 'FibFiber.exe 2 37'
+    3.39 ± 0.03 times faster than 'FibFiber.exe 1 37'
 ```
 
 ```sh
-➜  P=FibPar.exe; N=37; hyperfine --warmup 1 --shell none "$P --num-workers=1 $N" "$P --num-workers=2 $N" "$P --num-workers=4 $N" "$P --num-workers=8 $N"
-Benchmark 1: FibPar.exe --num-workers=1 37
+➜  P=FibPar.exe; N=37; hyperfine --warmup 1 --shell none "$P 1 $N" "$P 2 $N" "$P 4 $N" "$P 8 $N"
+Benchmark 1: FibPar.exe 1 37
   Time (mean ± σ):     895.2 ms ±   1.4 ms    [User: 891.7 ms, System: 2.9 ms]
   Range (min … max):   893.6 ms … 897.2 ms    10 runs
 
-Benchmark 2: FibPar.exe --num-workers=2 37
+Benchmark 2: FibPar.exe 2 37
   Time (mean ± σ):     551.4 ms ±   2.1 ms    [User: 1090.0 ms, System: 3.5 ms]
   Range (min … max):   549.3 ms … 555.6 ms    10 runs
 
-Benchmark 3: FibPar.exe --num-workers=4 37
+Benchmark 3: FibPar.exe 4 37
   Time (mean ± σ):     296.2 ms ±   1.1 ms    [User: 1145.6 ms, System: 7.4 ms]
   Range (min … max):   294.6 ms … 298.3 ms    10 runs
 
-Benchmark 4: FibPar.exe --num-workers=8 37
+Benchmark 4: FibPar.exe 8 37
   Time (mean ± σ):     443.9 ms ±  18.4 ms    [User: 2846.7 ms, System: 89.2 ms]
   Range (min … max):   419.7 ms … 483.3 ms    10 runs
 
 Summary
-  'FibPar.exe --num-workers=4 37' ran
-    1.50 ± 0.06 times faster than 'FibPar.exe --num-workers=8 37'
-    1.86 ± 0.01 times faster than 'FibPar.exe --num-workers=2 37'
-    3.02 ± 0.01 times faster than 'FibPar.exe --num-workers=1 37'
+  'FibPar.exe 4 37' ran
+    1.50 ± 0.06 times faster than 'FibPar.exe 8 37'
+    1.86 ± 0.01 times faster than 'FibPar.exe 2 37'
+    3.02 ± 0.01 times faster than 'FibPar.exe 1 37'
 ```
 
 In the following, the `fib_par` example of domainslib

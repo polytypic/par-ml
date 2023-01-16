@@ -48,13 +48,7 @@ let num_waiters = Multicore.copy_as_padded (ref 0)
 
 let workers =
   let num_workers =
-    Sys.argv
-    |> Array.find_map (fun arg ->
-           let prefix = "--num-workers=" in
-           if String.starts_with ~prefix arg then
-             let n = String.length prefix in
-             String.sub arg n (String.length arg - n) |> int_of_string_opt
-           else None)
+    (try int_of_string_opt Sys.argv.(1) with _ -> None)
     |> Option.map (Int.max 1)
     |> Option.map (Int.min (Domain.recommended_domain_count ()))
     |> Option.value ~default:(Domain.recommended_domain_count ())
