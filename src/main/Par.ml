@@ -6,7 +6,6 @@ let impossible () = failwith "impossible"
 (* *)
 
 let mutex = Mutex.create ()
-let condition = Condition.create ()
 
 (* *)
 
@@ -17,7 +16,7 @@ let effc (type a) : a Effect.t -> _ = function
   | Suspend ef -> Some ef
   | _ -> None
 
-let handler = Multicore.copy_as_padded {Effect.Deep.effc}
+let handler = Multicore_magic.copy_as_padded {Effect.Deep.effc}
 
 (* *)
 
@@ -42,23 +41,44 @@ and stack = Work : 'a st Atomic.t * stack -> stack | Null : stack
 
 (* *)
 
-let shared = Multicore.copy_as_padded (ref Null)
+let shared = Multicore_magic.copy_as_padded (Atomic.make Null)
 
 let workers =
-  let num_workers =
-    Sys.argv
-    |> Array.find_map (fun arg ->
-           let prefix = "--num-workers=" in
-           if String.starts_with ~prefix arg then
-             let n = String.length prefix in
-             String.sub arg n (String.length arg - n) |> int_of_string_opt
-           else None)
-    |> Option.map (Int.max 1)
-    |> Option.map (Int.min (Domain.recommended_domain_count ()))
-    |> Option.value ~default:(Domain.recommended_domain_count ())
-  in
-  Multicore.copy_as_padded
-    (Array.init num_workers (fun _ -> Multicore.copy_as_padded (ref Null)))
+  Multicore_magic.copy_as_padded
+    (ref
+       (Multicore_magic.make_padded_array
+          (Domain.recommended_domain_count ())
+          (null ())))
+
+let worker_at i = Array.unsafe_get !workers i [@@inline]
+let worker () = worker_at (Domain.self () :> int) [@@inline]
+
+let set ar i x =
+  let n = Multicore_magic.length_of_padded_array !ar in
+  if n <= i then begin
+    let a =
+      Multicore_magic.make_padded_array (Int.max (n * 2) (i + 1)) (null ())
+    in
+    for i = 0 to n - 1 do
+      Array.unsafe_set a i (Array.unsafe_get !ar i)
+    done;
+    ar := a
+  end;
+  Array.unsafe_set !ar i x
+
+let prepare () =
+  Mutex.lock mutex;
+  Idle_domains.all ()
+  |> List.iter (fun (id : Idle_domains.managed_id) ->
+         set workers (id :> int) (Multicore_magic.copy_as_padded (ref Null)));
+  Mutex.unlock mutex
+
+let prepare (id : Idle_domains.managed_id) =
+  if
+    Multicore_magic.length_of_padded_array !workers <= (id :> int)
+    || null () == worker_at (id :> int)
+  then prepare ()
+  [@@inline]
 
 let rec dispatch res = function
   | Join (k, ws) ->
@@ -76,69 +96,50 @@ let run_fiber st th =
   dispatch res (Atomic.exchange st res)
 
 let doit st =
-  match Atomic.get st with
+  match Multicore_magic.fenceless_get st with
   | Initial th as was ->
     if Atomic.compare_and_set st was Running then run_fiber st th |> ignore
   | _ -> ()
 
-let rec main wr result = function
+let rec main wr =
+  match !wr with
   | Work (st, next) ->
-    if next != Null && !shared == Null then begin
-      Mutex.lock mutex;
-      if !shared == Null then begin
-        shared := next;
-        Condition.signal condition;
-        Mutex.unlock mutex;
-        wr := Null
-      end
-      else begin
-        Mutex.unlock mutex;
-        wr := next
-      end
+    if
+      next != Null
+      && Multicore_magic.fenceless_get shared == Null
+      && Atomic.compare_and_set shared Null next
+    then begin
+      Idle_domains.try_spawn ~scheduler |> ignore;
+      wr := Null
     end
     else wr := next;
     Effect.Deep.try_with doit st handler;
-    main wr result !wr
-  | Null ->
-    wr := Null;
-    Mutex.lock mutex;
-    while !shared == Null && !result == null () do
-      Condition.wait condition mutex
-    done;
-    let top = !shared in
-    shared := Null;
-    Mutex.unlock mutex;
-    if !result == null () then main wr result top
+    main wr
+  | Null -> try_shared wr
 
-let () =
-  let always_null = Multicore.copy_as_padded (ref (null ())) in
+and try_shared wr =
+  match Multicore_magic.fenceless_get shared with
+  | Null -> ()
+  | Work (st, next) as top ->
+    if not (Atomic.compare_and_set shared top next) then try_shared wr
+    else begin
+      if next != Null then Idle_domains.try_spawn ~scheduler |> ignore;
+      Effect.Deep.try_with doit st handler;
+      main wr
+    end
 
-  for _ = 2 to Multicore.length_of_padded_array workers do
-    Domain.spawn (fun () ->
-        let i = (Domain.self () :> int) in
-        if Multicore.length_of_padded_array workers <= i then
-          failwith "add_worker: not sequential";
-        let wr = Array.unsafe_get workers i in
-        main wr always_null !wr)
-    |> ignore
-  done
-
-let worker () = workers.((Domain.self () :> int)) [@@inline]
+and scheduler (mid : Idle_domains.managed_id) =
+  try_shared @@ worker_at (mid :> int)
 
 let push wr work =
   let next = !wr in
-  if next != Null && !shared == Null then begin
-    Mutex.lock mutex;
-    if !shared == Null then begin
-      shared := next;
-      Condition.signal condition;
-      Mutex.unlock mutex;
-      wr := Work (work, Null)
-    end
-    else begin
-      Mutex.unlock mutex;
-      wr := Work (work, next)
-    end
+  if
+    next != Null
+    && Multicore_magic.fenceless_get shared == Null
+    && Atomic.compare_and_set shared Null next
+  then begin
+    Idle_domains.try_spawn ~scheduler |> ignore;
+    wr := Work (work, Null)
   end
   else wr := Work (work, next)
   [@@inline]
@@ -150,22 +151,20 @@ let drop_if wr st' =
 
 (* *)
 
+let not_null result = !result != null ()
+
 let run ef =
-  if 0 <> (Domain.self () :> int) then failwith "only main domain may call run";
+  let mid = Idle_domains.self () in
+  prepare mid;
   let result = ref (null ()) in
   Effect.Deep.try_with
     (fun ef ->
-      let r = match ef () with v -> Ok v | exception e -> Error e in
-      Mutex.lock mutex;
-      result := r;
-      Condition.broadcast condition;
-      Mutex.unlock mutex)
+      (result := match ef () with v -> Ok v | exception e -> Error e);
+      Idle_domains.wakeup mid)
     ef handler;
-  let wr = Array.unsafe_get workers 0 in
-  main wr result !wr;
-  let res = !result in
-  result := null ();
-  Result.run res
+  main @@ worker_at (mid :> int);
+  Idle_domains.idle ~until:not_null result;
+  Result.run !result
 
 (* *)
 
@@ -216,7 +215,7 @@ module Fiber = struct
     st
 
   let rec join st =
-    match Atomic.get st with
+    match Multicore_magic.fenceless_get st with
     | Initial th as t ->
       if Atomic.compare_and_set st t Running then begin
         let wr = worker () in
@@ -233,7 +232,7 @@ module Fiber = struct
       Continuation.suspend @@ fun k ->
       let rec loop was =
         if not (Atomic.compare_and_set st was (Join (k, was))) then
-          match Atomic.get st with
+          match Multicore_magic.fenceless_get st with
           | Return x -> Continuation.return k x
           | Raise e -> Continuation.raise k e
           | was -> loop was
