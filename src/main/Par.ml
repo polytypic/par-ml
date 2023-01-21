@@ -86,47 +86,56 @@ let rec loop dcyl =
   Effect.Deep.match_with run_work work handler;
   loop dcyl
 
+let rounds = 2
+
 let rec main wr =
   try loop wr
   with DCYL.Empty ->
     DCYL.reset wr;
-    try_steal wr @@ Idle_domains.next @@ Idle_domains.self ()
+    try_steal wr rounds @@ Idle_domains.next @@ Idle_domains.self ()
 
-and try_steal wr id =
+and try_steal wr rounds id =
   let victim = worker_at (id :> int) in
   if victim != wr then
     match DCYL.steal victim with
     | work ->
-      if DCYL.seems_non_empty victim then
-        Idle_domains.try_spawn ~scheduler |> ignore;
+      if DCYL.seems_non_empty victim then Idle_domains.signal ();
       Effect.Deep.match_with run_work work handler;
       main wr
-    | exception DCYL.Empty -> try_steal wr @@ Idle_domains.next id
+    | exception DCYL.Empty -> try_steal wr rounds @@ Idle_domains.next id
+  else
+    let rounds = rounds - 1 in
+    if 0 < rounds then begin
+      try_steal wr rounds @@ Idle_domains.next id
+    end
 
-and scheduler mid =
+let scheduler (mid : Idle_domains.managed_id) =
   let wr = worker_at (mid :> int) in
-  try_steal wr @@ Idle_domains.next mid
+  try_steal wr rounds @@ Idle_domains.next mid
 
 let push wr work =
-  DCYL.push wr work;
-  Idle_domains.try_spawn ~scheduler |> ignore
+  Idle_domains.signal ();
+  DCYL.push wr work
   [@@inline]
 
 (* *)
 
-let not_null result = !result != null ()
+let num_runs = Multicore_magic.copy_as_padded (Atomic.make 0)
 
 let run ef =
-  let mid = Idle_domains.self () in
-  prepare mid;
+  let self = Idle_domains.self () in
+  prepare self;
+  if Atomic.fetch_and_add num_runs 1 = 0 then Idle_domains.register ~scheduler;
   let result = ref (null ()) in
   Effect.Deep.match_with
     (fun ef ->
       (result := match ef () with v -> Ok v | exception e -> Error e);
-      Idle_domains.wakeup mid)
+      Idle_domains.wakeup ~self;
+      if Atomic.fetch_and_add num_runs (-1) = 1 then
+        Idle_domains.unregister ~scheduler)
     ef handler;
-  main @@ worker_at (mid :> int);
-  Idle_domains.idle ~until:not_null result;
+  main @@ worker_at (self :> int);
+  Idle_domains.idle ~self;
   Result.run !result
 
 module Continuation = struct
