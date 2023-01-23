@@ -89,16 +89,7 @@ let next_index i =
 
 let first_index () = next_index (Domain.self () :> int) [@@inline]
 
-let add_waiter () =
-  let n = !num_waiters + 1 in
-  num_waiters := n;
-  if n = 1 then num_waiters_non_zero := true;
-  Condition.wait condition mutex;
-  let n = !num_waiters - 1 in
-  num_waiters := n;
-  if n = 0 then num_waiters_non_zero := false
-
-let rec main wr = try loop wr with DCYL.Empty -> try_steal wr (first_index ())
+let rec main wr = try loop wr with Exit -> try_steal wr (first_index ())
 
 and try_steal wr i =
   let victim = Array.unsafe_get workers i in
@@ -106,14 +97,21 @@ and try_steal wr i =
   else
     match DCYL.steal victim with
     | work ->
+      (*if DCYL.seems_non_empty victim then Condition.signal condition;*)
       Effect.Deep.try_with doit work handler;
       main wr
-    | exception DCYL.Empty -> try_steal wr (next_index i)
+    | exception Exit -> try_steal wr (next_index i)
 
 and wait wr i =
   if i <> 0 then begin
     Mutex.lock mutex;
-    add_waiter ();
+    let n = !num_waiters + 1 in
+    num_waiters := n;
+    if n = 1 then num_waiters_non_zero := true;
+    Condition.wait condition mutex;
+    let n = !num_waiters - 1 in
+    num_waiters := n;
+    if n = 0 then num_waiters_non_zero := false;
     Mutex.unlock mutex;
     try_steal wr (next_index i)
   end
