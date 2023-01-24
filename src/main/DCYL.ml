@@ -81,8 +81,8 @@ let clear_or_grow_and_push dcyl elem =
     done;
     (* We know that `lo_cache = hi`. *)
     Array.unsafe_set elems (lo_cache land mask) elem;
-    (* `incr` ensures elem is seen before `hi` and thieves read valid. *)
     Atomic.incr dcyl.hi
+    (* `incr` ensures elem is seen before `hi` and thieves read valid. *)
   end
   else begin
     (* Grow to make room. *)
@@ -96,8 +96,8 @@ let clear_or_grow_and_push dcyl elem =
     Multicore_magic.fence dcyl.hi;
     (* `fence` ensures `elems'` is filled before publishing it. *)
     dcyl.elems <- elems';
-    (* `incr` ensures elem is seen before `hi` and thieves read valid. *)
     Atomic.incr dcyl.hi
+    (* `incr` ensures elem is seen before `hi` and thieves read valid. *)
   end
 
 let push dcyl elem =
@@ -108,8 +108,8 @@ let push dcyl elem =
   let lo_cache = dcyl.lo_cache in
   if hi - lo_cache <= mask then begin
     Array.unsafe_set elems (hi land mask) elem;
-    (* `incr` ensures elem is seen before `hi` and thieves read valid. *)
     Atomic.incr dcyl.hi
+    (* `incr` ensures elem is seen before `hi` and thieves read valid. *)
   end
   else clear_or_grow_and_push dcyl elem
   [@@inline]
