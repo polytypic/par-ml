@@ -97,8 +97,8 @@ let push dcyl elem =
   (* `fenceless_get hi` is safe as only the owner mutates `hi`. *)
   let elems = dcyl.elems in
   let mask = mask_of elems in
-  let lo = dcyl.lo_cache in
-  if hi - lo < mask then begin
+  let lo_cache = dcyl.lo_cache in
+  if hi - lo_cache <= mask then begin
     Array.unsafe_set elems (hi land mask) elem;
     (* `incr` ensures elem is seen before `hi` and thieves read valid. *)
     Atomic.incr dcyl.hi
