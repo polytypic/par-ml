@@ -135,7 +135,7 @@ let pop dcyl =
   let hi = Atomic.fetch_and_add dcyl.hi (-1) - 1 in
   (* `fetch_and_add hi` ensures `hi` is written first to stop thieves. *)
   let lo = Multicore_magic.fenceless_get dcyl.lo in
-  (* `fenceless_get lo` is safe as thieves always `compare_and_set lo`. *)
+  (* `fenceless_get lo` is safe as we do not need the latest value. *)
   if hi < lo then begin
     Multicore_magic.fenceless_set dcyl.hi (hi + 1);
     (* `fenceless_set hi` is safe as old value is safe for thieves. *)
@@ -163,7 +163,7 @@ let drop_at dcyl at =
     Atomic.decr dcyl.hi;
     (* `decr hi` ensures `hi` is written first to stop thieves. *)
     let lo = Multicore_magic.fenceless_get dcyl.lo in
-    (* `fenceless_get lo` is safe as thieves always `compare_and_set lo?  *)
+    (* `fenceless_get lo` is safe as we do not need the latest value. *)
     if hi < lo then Multicore_magic.fenceless_set dcyl.hi (hi + 1)
       (* `fenceless_set hi` is safe as old value is safe for thieves. *)
     else
