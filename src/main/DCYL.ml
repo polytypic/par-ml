@@ -92,8 +92,10 @@ let clear_or_grow_and_push dcyl elem =
       Array.unsafe_set elems' (i land mask')
         (Array.unsafe_get elems (i land mask))
     done;
-    dcyl.elems <- elems';
     Array.unsafe_set elems' (hi land mask') elem;
+    Multicore_magic.fence dcyl.hi;
+    (* `fence` ensures `elems'` is filled before publishing it. *)
+    dcyl.elems <- elems';
     (* `incr` ensures elem is seen before `hi` and thieves read valid. *)
     Atomic.incr dcyl.hi
   end
