@@ -161,7 +161,7 @@ let drop_at dcyl at =
   let hi = Multicore_magic.fenceless_get dcyl.hi - 1 in
   if hi = at then begin
     Atomic.decr dcyl.hi;
-    (* `incr hi` ensures `hi` is written first to stop thieves. *)
+    (* `decr hi` ensures `hi` is written first to stop thieves. *)
     let lo = Multicore_magic.fenceless_get dcyl.lo in
     (* `fenceless_get lo` is safe as thieves always `compare_and_set lo?  *)
     if hi < lo then Multicore_magic.fenceless_set dcyl.hi (hi + 1)
