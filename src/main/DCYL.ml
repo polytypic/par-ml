@@ -64,17 +64,23 @@ let make () =
 
 let mark dcyl = Multicore_magic.fenceless_get dcyl.hi [@@inline]
 
-let clear_or_grow_and_push dcyl ~elem ~hi ~elems ~mask =
+let clear_or_grow_and_push dcyl elem =
+  let hi = Multicore_magic.fenceless_get dcyl.hi in
+  (* `fenceless_get hi` is safe as only the owner mutates `hi`. *)
   let lo = Multicore_magic.fenceless_get dcyl.lo in
   (* `fenceless_get lo` is safe as we do not need the latest value. *)
+  let elems = dcyl.elems in
+  let mask = mask_of elems in
   let lo_cache = dcyl.lo_cache in
   if lo_cache < lo then begin
     (* Clear stolen elements to make room. *)
     dcyl.lo_cache <- lo;
-    for i = lo_cache to lo - 1 do
+    for i = lo - 1 downto lo_cache + 1 do
+      (* Write downto as then the last written cache line will be used next. *)
       Array.unsafe_set elems (i land mask) (Obj.magic ())
     done;
-    Array.unsafe_set elems (hi land mask) elem;
+    (* We know that `lo_cache = hi`. *)
+    Array.unsafe_set elems (lo_cache land mask) elem;
     (* `incr` ensures elem is seen before `hi` and thieves read valid. *)
     Atomic.incr dcyl.hi
   end
@@ -103,7 +109,7 @@ let push dcyl elem =
     (* `incr` ensures elem is seen before `hi` and thieves read valid. *)
     Atomic.incr dcyl.hi
   end
-  else clear_or_grow_and_push dcyl ~elem ~hi ~elems ~mask
+  else clear_or_grow_and_push dcyl elem
   [@@inline]
 
 let reset_and_exit dcyl elems lo =
