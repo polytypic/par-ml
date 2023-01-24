@@ -65,8 +65,6 @@ let make () =
 let mark dcyl = Multicore_magic.fenceless_get dcyl.hi [@@inline]
 
 let clear_or_grow_and_push dcyl elem =
-  let hi = Multicore_magic.fenceless_get dcyl.hi in
-  (* `fenceless_get hi` is safe as only the owner mutates `hi`. *)
   let lo = Multicore_magic.fenceless_get dcyl.lo in
   (* `fenceless_get lo` is safe as we do not need the latest value. *)
   let elems = dcyl.elems in
@@ -86,6 +84,8 @@ let clear_or_grow_and_push dcyl elem =
   end
   else begin
     (* Grow to make room. *)
+    let hi = Multicore_magic.fenceless_get dcyl.hi in
+    (* `fenceless_get hi` is safe as only the owner mutates `hi`. *)
     let mask' = (mask * 2) + 1 in
     let elems' = Multicore_magic.make_padded_array (mask' + 1) (Obj.magic ()) in
     for i = lo to hi - 1 do
