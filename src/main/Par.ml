@@ -54,7 +54,7 @@ let workers =
     |> Option.value ~default:(Domain.recommended_domain_count ())
   in
   Multicore_magic.copy_as_padded
-    (Array.init num_workers (fun _ -> DCYL.make ()))
+    (Array.init num_workers (fun _ -> DCYL.create ()))
 
 let rec dispatch res = function
   | Join (k, ws) ->

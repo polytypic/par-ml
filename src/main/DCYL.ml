@@ -40,7 +40,7 @@ let mask_of array =
   Multicore_magic.length_of_padded_array_minus_1 array
   [@@inline]
 
-let make () =
+let create () =
   Multicore_magic.copy_as_padded
     {
       lo = Multicore_magic.copy_as_padded (Atomic.make 0);
@@ -62,7 +62,7 @@ let make () =
       lo_cache = 0;
     }
 
-let mark dcyl = Multicore_magic.fenceless_get dcyl.hi [@@inline]
+let mark t = Multicore_magic.fenceless_get t.hi [@@inline]
 
 let clear ~elems ~mask ~start ~stop =
   let n = stop - start in
@@ -80,79 +80,79 @@ let double ~elems ~mask ~elems' ~mask' ~start =
   Array.blit elems 0 elems' ((start + m) land mask') (length - m)
   [@@inline]
 
-let clear_or_double_and_push dcyl elem =
-  let lo = Multicore_magic.fenceless_get dcyl.lo in
+let clear_or_double_and_push t elem =
+  let lo = Multicore_magic.fenceless_get t.lo in
   (* `fenceless_get lo` is safe as we do not need the latest value. *)
-  let elems = dcyl.elems in
+  let elems = t.elems in
   let mask = mask_of elems in
-  let lo_cache = dcyl.lo_cache in
+  let lo_cache = t.lo_cache in
   if lo_cache <> lo then begin
     (* Clear stolen elements to make room. *)
-    dcyl.lo_cache <- lo;
+    t.lo_cache <- lo;
     clear ~elems ~mask ~start:(lo_cache + 1) ~stop:lo;
     (* We know that `lo_cache = hi`. *)
     Array.unsafe_set elems (lo_cache land mask) elem;
-    Atomic.incr dcyl.hi
+    Atomic.incr t.hi
     (* `incr` ensures elem is seen before `hi` and thieves read valid. *)
   end
   else begin
     (* Double to make room. *)
-    let hi = Multicore_magic.fenceless_get dcyl.hi in
+    let hi = Multicore_magic.fenceless_get t.hi in
     (* `fenceless_get hi` is safe as only the owner mutates `hi`. *)
     let mask' = (mask * 2) + 1 in
     let elems' = Multicore_magic.make_padded_array (mask' + 1) (Obj.magic ()) in
     double ~elems ~mask ~elems' ~mask' ~start:lo;
     Array.unsafe_set elems' (hi land mask') elem;
-    Multicore_magic.fence dcyl.hi;
+    Multicore_magic.fence t.hi;
     (* `fence` ensures `elems'` is filled before publishing it. *)
-    dcyl.elems <- elems';
-    Atomic.incr dcyl.hi
+    t.elems <- elems';
+    Atomic.incr t.hi
     (* `incr` ensures elem is seen before `hi` and thieves read valid. *)
   end
   [@@inline never]
 
-let push dcyl elem =
-  let hi = Multicore_magic.fenceless_get dcyl.hi in
+let push t elem =
+  let hi = Multicore_magic.fenceless_get t.hi in
   (* `fenceless_get hi` is safe as only the owner mutates `hi`. *)
-  let elems = dcyl.elems in
+  let elems = t.elems in
   let mask = mask_of elems in
-  let lo_cache = dcyl.lo_cache in
+  let lo_cache = t.lo_cache in
   if hi - lo_cache <= mask then begin
     Array.unsafe_set elems (hi land mask) elem;
-    Atomic.incr dcyl.hi
+    Atomic.incr t.hi
     (* `incr` ensures elem is seen before `hi` and thieves read valid. *)
   end
-  else clear_or_double_and_push dcyl elem
+  else clear_or_double_and_push t elem
   [@@inline]
 
-let reset_and_exit dcyl elems lo =
+let reset_and_exit t elems lo =
   if Multicore_magic.length_of_padded_array elems <> min_capacity then begin
-    dcyl.lo_cache <- lo;
-    dcyl.elems <- Multicore_magic.make_padded_array min_capacity (Obj.magic ())
+    t.lo_cache <- lo;
+    t.elems <- Multicore_magic.make_padded_array min_capacity (Obj.magic ())
   end
   else begin
-    let lo_cache = dcyl.lo_cache in
+    let lo_cache = t.lo_cache in
     if lo_cache <> lo then begin
-      dcyl.lo_cache <- lo;
+      t.lo_cache <- lo;
       let mask = mask_of elems in
       clear ~elems ~mask ~start:lo_cache ~stop:lo
     end
   end;
   raise Exit
 
-let pop dcyl =
-  let hi = Atomic.fetch_and_add dcyl.hi (-1) - 1 in
+let pop t =
+  let hi = Atomic.fetch_and_add t.hi (-1) - 1 in
   (* `fetch_and_add hi` ensures `hi` is written first to stop thieves. *)
-  let lo = Multicore_magic.fenceless_get dcyl.lo in
+  let lo = Multicore_magic.fenceless_get t.lo in
   (* `fenceless_get lo` is safe as we do not need the latest value. *)
   let n = hi - lo in
   if n < 0 then begin
-    Multicore_magic.fenceless_set dcyl.hi (hi + 1);
+    Multicore_magic.fenceless_set t.hi (hi + 1);
     (* `fenceless_set hi` is safe as old value is safe for thieves. *)
-    reset_and_exit dcyl dcyl.elems lo
+    reset_and_exit t t.elems lo
   end
   else
-    let elems = dcyl.elems in
+    let elems = t.elems in
     let mask = mask_of elems in
     let i = hi land mask in
     let elem = Array.unsafe_get elems i in
@@ -162,49 +162,47 @@ let pop dcyl =
     end
     else
       (* Compete with thieves for last element. *)
-      let got = Atomic.compare_and_set dcyl.lo lo (lo + 1) in
-      Multicore_magic.fenceless_set dcyl.hi (hi + 1);
+      let got = Atomic.compare_and_set t.lo lo (lo + 1) in
+      Multicore_magic.fenceless_set t.hi (hi + 1);
       (* `fenceless_set hi` is safe as old value is safe for thieves. *)
-      if got then elem else reset_and_exit dcyl elems lo
+      if got then elem else reset_and_exit t elems lo
 
-let drop_at dcyl at =
-  let hi = Multicore_magic.fenceless_get dcyl.hi - 1 in
+let drop_at t at =
+  let hi = Multicore_magic.fenceless_get t.hi - 1 in
   if hi = at then begin
-    Atomic.decr dcyl.hi;
+    Atomic.decr t.hi;
     (* `decr hi` ensures `hi` is written first to stop thieves. *)
-    let lo = Multicore_magic.fenceless_get dcyl.lo in
+    let lo = Multicore_magic.fenceless_get t.lo in
     (* `fenceless_get lo` is safe as we do not need the latest value. *)
     let n = hi - lo in
-    if n < 0 then Multicore_magic.fenceless_set dcyl.hi (hi + 1)
+    if n < 0 then Multicore_magic.fenceless_set t.hi (hi + 1)
       (* `fenceless_set hi` is safe as old value is safe for thieves. *)
     else
-      let elems = dcyl.elems in
+      let elems = t.elems in
       let mask = mask_of elems in
       if 0 < n then Array.unsafe_set elems (hi land mask) (Obj.magic ())
       else begin
         (* Compete with thieves for last element. *)
-        Atomic.compare_and_set dcyl.lo lo (lo + 1) |> ignore;
-        Multicore_magic.fenceless_set dcyl.hi (hi + 1)
+        Atomic.compare_and_set t.lo lo (lo + 1) |> ignore;
+        Multicore_magic.fenceless_set t.hi (hi + 1)
         (* `fenceless_set hi` is safe as old value is safe for thieves. *)
       end
   end
 
-let rec steal dcyl =
-  let lo = Multicore_magic.fenceless_get dcyl.lo in
+let rec steal t =
+  let lo = Multicore_magic.fenceless_get t.lo in
   (* `fenceless_get lo` is safe as it is verified by `compare_and_set lo`. *)
-  let n = Atomic.get dcyl.hi - lo in
-  (* `get hi` ensures the `dcyl.elems` access below is safe. *)
+  let n = Atomic.get t.hi - lo in
+  (* `get hi` ensures the `t.elems` access below is safe. *)
   if n <= 0 then raise Exit
   else
-    let elems = dcyl.elems in
+    let elems = t.elems in
     let elem = Array.unsafe_get elems (lo land mask_of elems) in
-    if Atomic.compare_and_set dcyl.lo lo (lo + 1) then
+    if Atomic.compare_and_set t.lo lo (lo + 1) then
       (* Unsafe to write `Obj.magic ()` over elem here. *)
       elem
-    else steal dcyl
+    else steal t
 
-let seems_non_empty dcyl =
-  0
-  < Multicore_magic.fenceless_get dcyl.hi
-    - Multicore_magic.fenceless_get dcyl.lo
+let seems_empty t =
+  Multicore_magic.fenceless_get t.hi - Multicore_magic.fenceless_get t.lo <= 0
   [@@inline]
