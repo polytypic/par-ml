@@ -87,13 +87,14 @@ let clear_or_double_and_push t elem =
   let mask = mask_of elems in
   let lo_cache = t.lo_cache in
   if lo_cache <> lo then begin
-    (* Clear stolen elements to make room. *)
-    t.lo_cache <- lo;
-    clear ~elems ~mask ~start:(lo_cache + 1) ~stop:lo;
     (* We know that `lo_cache = hi`. *)
     Array.unsafe_set elems (lo_cache land mask) elem;
-    Atomic.incr t.hi
+    (* Publish the new element first. *)
+    Atomic.incr t.hi;
     (* `incr` ensures elem is seen before `hi` and thieves read valid. *)
+    t.lo_cache <- lo;
+    (* Clear stolen elements last. *)
+    clear ~elems ~mask ~start:(lo_cache + 1) ~stop:lo
   end
   else begin
     (* Double to make room. *)
