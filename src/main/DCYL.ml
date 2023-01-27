@@ -12,8 +12,8 @@
 
 type 'a t = {
   lo : int Atomic.t;
-  hi : int Atomic.t;
   (* Only the owner mutates the rest: *)
+  hi : int Atomic.t;
   mutable elems : 'a array;
   m3 : int;
   m4 : int;
