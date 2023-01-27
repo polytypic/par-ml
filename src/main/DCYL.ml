@@ -15,19 +15,6 @@ type 'a t = {
   (* Only the owner mutates the rest: *)
   hi : int Atomic.t;
   mutable elems : 'a array;
-  m3 : int;
-  m4 : int;
-  m5 : int;
-  m6 : int;
-  m7 : int;
-  m8 : int;
-  m9 : int;
-  mA : int;
-  mB : int;
-  mC : int;
-  mD : int;
-  mE : int;
-  mF : int;
   mutable lo_cache : int;
 }
 
@@ -46,19 +33,6 @@ let create () =
       lo = Multicore_magic.copy_as_padded (Atomic.make 0);
       hi = Multicore_magic.copy_as_padded (Atomic.make 0);
       elems = Multicore_magic.make_padded_array min_capacity (Obj.magic ());
-      m3 = 0;
-      m4 = 0;
-      m5 = 0;
-      m6 = 0;
-      m7 = 0;
-      m8 = 0;
-      m9 = 0;
-      mA = 0;
-      mB = 0;
-      mC = 0;
-      mD = 0;
-      mE = 0;
-      mF = 0;
       lo_cache = 0;
     }
 
