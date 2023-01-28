@@ -5,7 +5,6 @@
 main() {
   clone-repo
   build-and-test
-  publish-submodule
   publish-docs
   cleanup
 }
@@ -20,13 +19,6 @@ clone-repo() {
 
 build-and-test() {
   CI=true script/ci
-}
-
-publish-submodule() {
-  git checkout main-submodule
-  git rebase main
-  git push --force-with-lease
-  git checkout main
 }
 
 publish-docs() {
