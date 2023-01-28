@@ -5,6 +5,7 @@ val par : (unit -> 'a) -> (unit -> 'b) -> 'a * 'b
 (** Perform the two given actions potentially in parallel.  Parallel execution
     is not guaranteed. *)
 
+(** Co-operative threads of control. *)
 module Fiber : sig
   type 'a t
   (** Represents a co-operative thread of control. *)
@@ -17,6 +18,7 @@ module Fiber : sig
       or raise the exception it terminated with. *)
 end
 
+(** Exactly-once continuations. *)
 module Continuation : sig
   type 'a t
   (** Represents an exactly-once continuation expecting a value of type ['a]. *)
