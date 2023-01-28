@@ -17,7 +17,7 @@ the version implemented [here](src/main/DCYL.ml):
 - Fewer atomic variables and fenced operations are used (closer to
   [original paper](https://www.semanticscholar.org/paper/Dynamic-circular-work-stealing-deque-Chase-Lev/f856a996e7aec0ea6db55e9247a00a01cb695090)).
 - A level of (pointer) indirection is avoided by using a different technique to
-  release stolen elements (look for `clear_stolen`).
+  release stolen elements (look for `clear`).
 - [`mark` and `drop_at` operations](src/main/DCYL.mli) are provided to allow
   owner to remove elements from deque without dropping to main loop.
 
@@ -41,8 +41,8 @@ implemented [here](src/main/Par.ml):
 It would seem that the ability to drop work items from the owned deque, and
 thereby avoid accumulation of stale work items, and, at the same time, ability
 to avoid capturing continuations, can provide major performance benefits
-(roughly 5x) in cases where it applies. Other optimizations provide a small
-benefits (roughly 2x).
+(roughly 5x) in cases where it applies. Other optimizations provide small
+benefits (combining to roughly 2x).
 
 Avoiding false-sharing is crucial for stable performance.
 
