@@ -5,12 +5,12 @@ type 'a t
     limit on how many items may be pushed to and stolen from a deque as long as
     the elements fit into a single array at all times. *)
 
+val create : unit -> 'a t
+(** Create a new work-stealing deque. *)
+
 (** {2 For the owner}
 
     Only the owner may call the operations in this section. *)
-
-val create : unit -> 'a t
-(** Create a new work-stealing deque. *)
 
 val push : 'a t -> 'a -> unit
 (** Push a new element to the deque.
