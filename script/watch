@@ -13,7 +13,7 @@ tmux select-pane -t 0
 tmux send-keys "npx livereload $DOCS --wait 250" C-m
 
 tmux select-pane -t 1
-tmux send-keys "npx serve dics $DOCS" C-m
+tmux send-keys "npx serve $DOCS" C-m
 
 tmux select-pane -t 2
 tmux send-keys "script/watch-test" C-m
